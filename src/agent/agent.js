@@ -6,7 +6,8 @@ import { marked } from "marked";
 import { markedTerminal } from "marked-terminal";
 import { aiService } from "../services/ai.service.js";
 import { allTools, getToolsForTask, toolDescriptions } from "../tools/index.js";
-import { config } from "../config/env.js";
+import { config, getCurrentProvider } from "../config/env.js";
+import { PROVIDERS } from "../config/providers.js";
 
 // Configure marked for terminal
 marked.use(
@@ -136,10 +137,14 @@ export async function runAgent(options = {}) {
   // Display intro
   if (!singlePrompt) {
     const currentModel = aiService.getModelId();
+    const currentProviderId = await getCurrentProvider();
+    const provider = PROVIDERS[currentProviderId];
+
     console.log(
       boxen(
         chalk.bold.cyan("🚀 agentic AI Agent\n\n") +
         chalk.gray("An agentic assistant for development tasks\n") +
+        chalk.gray(`Provider: ${chalk.white(provider.name)} | `) +
         chalk.gray(`Mode: ${chalk.white(mode)} | Tools: ${chalk.white(toolNames.length)}\n`) +
         chalk.gray(`Model: ${chalk.white(currentModel)}`),
         {

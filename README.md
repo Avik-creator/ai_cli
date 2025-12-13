@@ -44,31 +44,112 @@ bun link
 
 ## Setup
 
-Configure your API keys:
+### 1. Select Your AI Provider
+
+Choose which AI provider you want to use:
 
 ```bash
-# Interactive setup wizard
+# Interactive provider selection
+agentic config provider set
+
+# Or set directly
+agentic config provider set openai
+agentic config provider set anthropic
+agentic config provider set google
+agentic config provider set groq
+agentic config provider set mistral
+agentic config provider set xai
+agentic config provider set gateway  # Vercel AI Gateway (default)
+```
+
+**Available Providers:**
+- **Vercel AI Gateway** (default) - Access 100+ models with a single API key
+- **OpenAI** - GPT-5, GPT-4, O-series models
+- **Anthropic** - Claude Opus, Sonnet, Haiku models
+- **Google Generative AI** - Gemini 2.5, 3.0, Imagen models
+- **Groq** - Fast inference for Llama, Mixtral, Gemma models
+- **Mistral AI** - Mistral Large, Medium, Small models
+- **xAI Grok** - Grok 4, Grok 3, Grok 2 models
+
+### 2. Configure API Keys
+
+```bash
+# Interactive setup wizard (configures provider + API keys)
 bun run setup
 # or
 agentic config setup
 
 # Or set individual keys
-agentic config set AI_GATEWAY_API_KEY your_key_here
-agentic config set EXA_API_KEY your_key_here
-agentic config set GITHUB_TOKEN your_token_here
+agentic config set OPENAI_API_KEY your_key_here
+agentic config set ANTHROPIC_API_KEY your_key_here
+# etc.
 ```
 
 ### Required API Keys
 
-| Key | Description | Get it from |
-|-----|-------------|-------------|
-| `AI_GATEWAY_API_KEY` | Vercel AI Gateway API key (required) | [Vercel AI Gateway](https://vercel.com/ai-gateway) |
-| `EXA_API_KEY` | Exa Search API key (for web search) | [Exa AI](https://exa.ai) |
-| `GITHUB_TOKEN` | GitHub Personal Access Token (for PR reviews) | [GitHub Settings](https://github.com/settings/tokens) |
+The API key you need depends on your selected provider:
+
+| Provider | API Key Name | Get it from |
+|----------|--------------|-------------|
+| Vercel AI Gateway | `AI_GATEWAY_API_KEY` | [Vercel AI Gateway](https://vercel.com/ai-gateway) |
+| OpenAI | `OPENAI_API_KEY` | [OpenAI Platform](https://platform.openai.com/api-keys) |
+| Anthropic | `ANTHROPIC_API_KEY` | [Anthropic Console](https://console.anthropic.com/settings/keys) |
+| Google | `GOOGLE_GENERATIVE_AI_API_KEY` | [Google AI Studio](https://aistudio.google.com/apikey) |
+| Groq | `GROQ_API_KEY` | [Groq Console](https://console.groq.com/keys) |
+| Mistral | `MISTRAL_API_KEY` | [Mistral Console](https://console.mistral.ai/api-keys) |
+| xAI | `XAI_API_KEY` | [xAI Console](https://console.x.ai/api-keys) |
+
+**Optional Keys:**
+- `EXA_API_KEY` - For web search functionality ([Exa AI](https://exa.ai))
+- `GITHUB_TOKEN` - For PR review functionality ([GitHub Settings](https://github.com/settings/tokens))
+
+### 3. Install Provider Packages (Automatic)
+
+The CLI will **automatically install** provider packages when you select a provider! 
+
+When you run `agentic config provider set <provider>`, the CLI will:
+1. Check if the provider package is installed
+2. Prompt you to install it if missing
+3. Automatically run `bun add <package>` for you
+
+**Manual Installation (if needed):**
+
+If automatic installation fails, you can install manually:
+
+```bash
+bun add @ai-sdk/openai      # For OpenAI
+bun add @ai-sdk/anthropic   # For Anthropic
+bun add @ai-sdk/google      # For Google
+bun add @ai-sdk/groq        # For Groq
+bun add @ai-sdk/mistral     # For Mistral
+bun add @ai-sdk/xai         # For xAI
+```
+
+**Note:** 
+- Vercel AI Gateway is built into the AI SDK and doesn't require a separate package
+- Packages are also automatically installed when you first use a provider (if missing)
+
+### Provider Management
+
+```bash
+# List all available providers
+agentic config provider list
+
+# Show current provider
+agentic config provider current
+
+# Set provider interactively
+agentic config provider set
+
+# Set provider directly
+agentic config provider set openai
+```
 
 ### Model Management
 
-The CLI supports 100+ models from various providers through Vercel AI Gateway:
+The available models depend on your selected provider:
+
+**Vercel AI Gateway** (default) - 100+ models from multiple providers:
 
 ```bash
 # List all available models
@@ -94,16 +175,25 @@ When you run `agentic model set` without arguments, you'll see an interactive me
 
 The current model is marked with a ✓ checkmark in the menu.
 
-**Popular Models:**
+**Popular Models (Gateway):**
 - `openai/gpt-5-mini` - Fast and efficient (default)
 - `openai/gpt-5` - More capable
 - `anthropic/claude-sonnet-4.5` - Excellent reasoning
 - `google/gemini-2.5-flash` - Fast and versatile
 - `xai/grok-4` - Powerful reasoning
 
+**Provider-Specific Models:**
+- **OpenAI**: `gpt-5-mini`, `gpt-5`, `gpt-4o`, `o3`, `o3-mini`
+- **Anthropic**: `claude-sonnet-4.5`, `claude-opus-4.5`, `claude-haiku-4.5`
+- **Google**: `gemini-2.5-flash`, `gemini-2.5-pro`, `gemini-3-pro-preview`
+- **Groq**: `llama-3.3-70b-versatile`, `mixtral-8x7b-32768`, `qwen/qwen3-32b`
+- **Mistral**: `mistral-large-latest`, `mistral-medium-latest`, `pixtral-large-latest`
+- **xAI**: `grok-4`, `grok-3`, `grok-3-fast`
+
 Set a default model via environment variable:
 ```bash
-export AGENTICAI_MODEL=openai/gpt-5
+export AGENTICAI_MODEL=gpt-5-mini  # For OpenAI provider
+export AGENTICAI_MODEL=openai/gpt-5-mini  # For Gateway provider
 ```
 
 ## Usage

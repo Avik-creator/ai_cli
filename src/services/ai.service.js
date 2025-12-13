@@ -1,7 +1,8 @@
-import { streamText, generateObject, generateText, stepCountIs, gateway } from "ai";
+import { streamText, generateObject, generateText, stepCountIs } from "ai";
 import { config, AVAILABLE_MODELS } from "../config/env.js";
 import { PROVIDERS, PROVIDER_MODELS } from "../config/providers.js";
 import chalk from "chalk";
+import { spawn } from "child_process";
 
 export class AIService {
   constructor() {
@@ -15,7 +16,7 @@ export class AIService {
   async initialize(modelId = null) {
     // Get current provider
     const currentProviderId = await config.getCurrentProvider();
-    
+
     // If provider changed, reinitialize
     if (this.providerId !== currentProviderId) {
       this.initialized = false;
@@ -48,18 +49,50 @@ export class AIService {
 
     // Initialize provider instance
     if (provider.id === "gateway") {
-      // Gateway uses model strings directly
-      this.providerInstance = null; // Gateway is handled by AI SDK automatically
+      // Gateway uses model strings directly - AI SDK handles it automatically
+      // when AI_GATEWAY_API_KEY is set
+      this.providerInstance = null;
     } else {
       // Load provider dynamically
       try {
         const providerModule = await import(provider.importPath);
-        const providerFn = providerModule[provider.id] || providerModule.default;
+        // Provider exports are usually named exports (e.g., `openai`, `anthropic`)
+        // or default exports
+        const providerFn = providerModule[provider.id] || providerModule.default || providerModule;
+        if (typeof providerFn !== "function") {
+          throw new Error(`Provider "${provider.id}" is not a function`);
+        }
         this.providerInstance = providerFn;
       } catch (error) {
-        throw new Error(
-          `Provider package "${provider.package}" not installed. Run: bun add ${provider.package}`
-        );
+        if (error.code === "ERR_MODULE_NOT_FOUND" || error.message.includes("Cannot find module")) {
+          // Try to install the package automatically
+          console.log(
+            chalk.yellow(
+              `\n⚠️  Provider package "${provider.package}" not found.\n` +
+              `Installing ${provider.package}...\n`
+            )
+          );
+
+          try {
+            await this.installProviderPackage(provider.package);
+            // Retry import after installation
+            const providerModule = await import(provider.importPath);
+            const providerFn = providerModule[provider.id] || providerModule.default || providerModule;
+            if (typeof providerFn !== "function") {
+              throw new Error(`Provider "${provider.id}" is not a function`);
+            }
+            this.providerInstance = providerFn;
+            console.log(chalk.green(`✓ ${provider.package} installed successfully\n`));
+          } catch (installError) {
+            throw new Error(
+              `Failed to install provider package "${provider.package}".\n` +
+              `Please run manually: ${chalk.cyan(`bun add ${provider.package}`)}\n` +
+              `Error: ${installError.message}`
+            );
+          }
+        } else {
+          throw error;
+        }
       }
     }
 
@@ -230,6 +263,32 @@ export class AIService {
       console.error(chalk.red("Structured Generation Error:"), error.message);
       throw error;
     }
+  }
+
+  /**
+   * Install provider package using bun add
+   */
+  async installProviderPackage(packageName) {
+    return new Promise((resolve, reject) => {
+      // Use bun add to install the package
+      const bun = spawn("bun", ["add", packageName], {
+        stdio: "inherit",
+        shell: true,
+        cwd: process.cwd(), // Install in current project directory
+      });
+
+      bun.on("close", (code) => {
+        if (code === 0) {
+          resolve();
+        } else {
+          reject(new Error(`Installation failed with code ${code}`));
+        }
+      });
+
+      bun.on("error", (error) => {
+        reject(error);
+      });
+    });
   }
 
   /**

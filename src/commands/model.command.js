@@ -2,26 +2,46 @@ import { Command } from "commander";
 import chalk from "chalk";
 import boxen from "boxen";
 import { select, isCancel, intro, outro, confirm } from "@clack/prompts";
-import { AVAILABLE_MODELS, getModelsByProvider, config } from "../config/env.js";
+import { AVAILABLE_MODELS, getModelsByProvider, config, getCurrentProvider } from "../config/env.js";
+import { PROVIDERS, PROVIDER_MODELS } from "../config/providers.js";
 import { aiService } from "../services/ai.service.js";
 
 /**
  * List all available models
  */
 async function listAction() {
+  const currentProviderId = await getCurrentProvider();
+  const provider = PROVIDERS[currentProviderId];
+
   console.log(chalk.bold("\n📋 Available Models:\n"));
+  console.log(chalk.gray(`Current Provider: ${chalk.white(provider.name)}\n`));
 
-  // Group by provider
-  const providers = [...new Set(AVAILABLE_MODELS.map((m) => m.provider))].sort();
+  if (currentProviderId === "gateway") {
+    // Gateway: Show all models grouped by provider
+    const providers = [...new Set(AVAILABLE_MODELS.map((m) => m.provider))].sort();
 
-  for (const provider of providers) {
-    const models = getModelsByProvider(provider);
-    console.log(chalk.cyan.bold(`\n${provider.toUpperCase()}:`));
-    models.forEach((model) => {
-      const isCurrent = model.id === config.getModel();
-      const marker = isCurrent ? chalk.green("✓") : " ";
-      console.log(`  ${marker} ${chalk.white(model.id)} - ${chalk.gray(model.name)}`);
-    });
+    for (const providerName of providers) {
+      const models = getModelsByProvider(providerName);
+      console.log(chalk.cyan.bold(`\n${providerName.toUpperCase()}:`));
+      models.forEach((model) => {
+        const isCurrent = model.id === config.getModel();
+        const marker = isCurrent ? chalk.green("✓") : " ";
+        console.log(`  ${marker} ${chalk.white(model.id)} - ${chalk.gray(model.name)}`);
+      });
+    }
+  } else {
+    // Other providers: Show provider-specific models
+    const models = PROVIDER_MODELS[currentProviderId] || [];
+    if (models.length === 0) {
+      console.log(chalk.yellow(`No models configured for ${provider.name}`));
+      console.log(chalk.gray("Check the provider documentation for available models."));
+    } else {
+      models.forEach((model) => {
+        const isCurrent = model.id === config.getModel();
+        const marker = isCurrent ? chalk.green("✓") : " ";
+        console.log(`  ${marker} ${chalk.white(model.id)} - ${chalk.gray(model.name)}`);
+      });
+    }
   }
 
   console.log(chalk.gray(`\nCurrent model: ${chalk.cyan(config.getModel())}`));
@@ -40,40 +60,86 @@ async function setAction(modelId) {
     // Interactive selection
     intro(chalk.bold.cyan("🤖 Model Selection"));
 
-    // Ask if user wants to filter by provider or see all models
-    const filterByProvider = await confirm({
-      message: "Filter by provider first? (easier navigation)",
-      initialValue: false,
-    });
-
-    if (isCancel(filterByProvider)) {
-      outro(chalk.yellow("Model selection cancelled"));
-      return;
-    }
+    const currentProviderId = await getCurrentProvider();
+    const provider = PROVIDERS[currentProviderId];
+    const currentModelId = config.getModel();
 
     let modelChoice;
 
-    if (filterByProvider) {
-      // Two-step: Provider first, then model
-      const providers = [...new Set(AVAILABLE_MODELS.map((m) => m.provider))].sort();
-      const providerChoice = await select({
-        message: "Select a provider:",
-        options: providers.map((p) => ({
-          value: p,
-          label: chalk.bold(p.toUpperCase()),
-          hint: `${getModelsByProvider(p).length} models available`,
-        })),
+    if (currentProviderId === "gateway") {
+      // Gateway: Show all models with provider filtering option
+      const filterByProvider = await confirm({
+        message: "Filter by provider first? (easier navigation)",
+        initialValue: false,
       });
 
-      if (isCancel(providerChoice)) {
+      if (isCancel(filterByProvider)) {
         outro(chalk.yellow("Model selection cancelled"));
         return;
       }
 
-      const models = getModelsByProvider(providerChoice);
-      const currentModelId = config.getModel();
+      if (filterByProvider) {
+        // Two-step: Provider first, then model
+        const providers = [...new Set(AVAILABLE_MODELS.map((m) => m.provider))].sort();
+        const providerChoice = await select({
+          message: "Select a provider:",
+          options: providers.map((p) => ({
+            value: p,
+            label: chalk.bold(p.toUpperCase()),
+            hint: `${getModelsByProvider(p).length} models available`,
+          })),
+        });
+
+        if (isCancel(providerChoice)) {
+          outro(chalk.yellow("Model selection cancelled"));
+          return;
+        }
+
+        const models = getModelsByProvider(providerChoice);
+        modelChoice = await select({
+          message: `Select a model from ${providerChoice.toUpperCase()}:`,
+          options: models.map((m) => {
+            const isCurrent = m.id === currentModelId;
+            return {
+              value: m.id,
+              label: `${isCurrent ? chalk.green("✓ ") : "  "}${chalk.white(m.name)} ${chalk.gray(`(${m.id})`)}`,
+              hint: isCurrent ? "current" : undefined,
+            };
+          }),
+        });
+      } else {
+        // Single-step: Show all models at once
+        const providers = [...new Set(AVAILABLE_MODELS.map((m) => m.provider))].sort();
+        const allModels = [];
+
+        for (const providerName of providers) {
+          const models = getModelsByProvider(providerName);
+          models.forEach((m) => {
+            const isCurrent = m.id === currentModelId;
+            allModels.push({
+              value: m.id,
+              label: `${isCurrent ? chalk.green("✓ ") : "  "}${chalk.white(m.name)} ${chalk.gray(`[${providerName}]`)}`,
+              hint: isCurrent ? "current" : m.id,
+            });
+          });
+        }
+
+        modelChoice = await select({
+          message: "Select a model (100+ available):",
+          options: allModels,
+        });
+      }
+    } else {
+      // Other providers: Show provider-specific models
+      const models = PROVIDER_MODELS[currentProviderId] || [];
+      if (models.length === 0) {
+        console.log(chalk.yellow(`No models configured for ${provider.name}`));
+        outro(chalk.yellow("Model selection cancelled"));
+        return;
+      }
+
       modelChoice = await select({
-        message: `Select a model from ${providerChoice.toUpperCase()}:`,
+        message: `Select a model from ${provider.name}:`,
         options: models.map((m) => {
           const isCurrent = m.id === currentModelId;
           return {
@@ -82,30 +148,6 @@ async function setAction(modelId) {
             hint: isCurrent ? "current" : undefined,
           };
         }),
-      });
-    } else {
-      // Single-step: Show all models at once (grouped by provider for better UX)
-      const currentModelId = config.getModel();
-
-      // Group models by provider for better organization
-      const providers = [...new Set(AVAILABLE_MODELS.map((m) => m.provider))].sort();
-      const allModels = [];
-
-      for (const provider of providers) {
-        const models = getModelsByProvider(provider);
-        models.forEach((m) => {
-          const isCurrent = m.id === currentModelId;
-          allModels.push({
-            value: m.id,
-            label: `${isCurrent ? chalk.green("✓ ") : "  "}${chalk.white(m.name)} ${chalk.gray(`[${provider}]`)}`,
-            hint: isCurrent ? "current" : m.id,
-          });
-        });
-      }
-
-      modelChoice = await select({
-        message: "Select a model (100+ available):",
-        options: allModels,
       });
     }
 
@@ -117,11 +159,20 @@ async function setAction(modelId) {
     modelId = modelChoice;
   }
 
-  // Validate model
-  const model = AVAILABLE_MODELS.find((m) => m.id === modelId);
+  // Validate model based on current provider
+  const currentProviderId = await getCurrentProvider();
+  let model = null;
+
+  if (currentProviderId === "gateway") {
+    model = AVAILABLE_MODELS.find((m) => m.id === modelId);
+  } else {
+    const providerModels = PROVIDER_MODELS[currentProviderId] || [];
+    model = providerModels.find((m) => m.id === modelId);
+  }
+
   if (!model) {
     console.log(
-      boxen(chalk.red(`❌ Model "${modelId}" not found`), {
+      boxen(chalk.red(`❌ Model "${modelId}" not found for current provider`), {
         padding: 1,
         borderStyle: "round",
         borderColor: "red",
@@ -134,11 +185,13 @@ async function setAction(modelId) {
   // Update model
   try {
     await aiService.setModel(modelId);
+    const provider = PROVIDERS[currentProviderId];
+
     console.log(
       boxen(
         chalk.green(`✅ Model set to: ${chalk.bold(modelId)}\n`) +
         chalk.gray(`Name: ${model.name}\n`) +
-        chalk.gray(`Provider: ${model.provider}`),
+        chalk.gray(`Provider: ${provider.name}`),
         {
           padding: 1,
           borderStyle: "round",
@@ -168,7 +221,16 @@ async function setAction(modelId) {
  */
 async function currentAction() {
   const currentModel = config.getModel();
-  const model = AVAILABLE_MODELS.find((m) => m.id === currentModel);
+  const currentProviderId = await getCurrentProvider();
+  const provider = PROVIDERS[currentProviderId];
+
+  let model = null;
+  if (currentProviderId === "gateway") {
+    model = AVAILABLE_MODELS.find((m) => m.id === currentModel);
+  } else {
+    const providerModels = PROVIDER_MODELS[currentProviderId] || [];
+    model = providerModels.find((m) => m.id === currentModel);
+  }
 
   if (model) {
     console.log(
@@ -176,7 +238,7 @@ async function currentAction() {
         `${chalk.bold("Current Model:")}\n` +
         `${chalk.cyan(model.id)}\n` +
         `${chalk.gray("Name:")} ${model.name}\n` +
-        `${chalk.gray("Provider:")} ${model.provider}`,
+        `${chalk.gray("Provider:")} ${provider.name}`,
         {
           padding: 1,
           borderStyle: "round",
@@ -188,6 +250,7 @@ async function currentAction() {
     console.log(
       boxen(
         `${chalk.yellow("Current Model:")} ${chalk.white(currentModel)}\n` +
+        `${chalk.gray("Provider:")} ${provider.name}\n` +
         chalk.gray("(Model not found in available models list)"),
         {
           padding: 1,
