@@ -20,6 +20,51 @@ export const readFileTool = tool({
       const absolutePath = path.resolve(process.cwd(), filePath);
       console.log(chalk.cyan(`\n📖 Reading: ${filePath}`));
 
+      // Check if file exists first
+      try {
+        await fs.stat(absolutePath);
+      } catch (statError) {
+        // File doesn't exist, provide helpful error
+        const dirPath = path.dirname(absolutePath);
+        let suggestion = "";
+
+        try {
+          // Check if directory exists
+          const dirStat = await fs.stat(dirPath);
+          if (dirStat.isDirectory()) {
+            // Try to list files in the directory to suggest alternatives
+            try {
+              const files = await fs.readdir(dirPath);
+              if (files.length > 0) {
+                const fileName = path.basename(filePath);
+                const similar = files.filter(f =>
+                  f.toLowerCase().includes(fileName.toLowerCase().substring(0, 3)) ||
+                  fileName.toLowerCase().includes(f.toLowerCase().substring(0, 3))
+                );
+                if (similar.length > 0) {
+                  suggestion = `\n  Did you mean one of these?\n  ${similar.slice(0, 5).map(f => `  - ${path.join(path.dirname(filePath), f)}`).join('\n')}`;
+                } else {
+                  suggestion = `\n  Files in ${path.dirname(filePath)}:\n  ${files.slice(0, 10).map(f => `  - ${path.join(path.dirname(filePath), f)}`).join('\n')}${files.length > 10 ? `\n  ... and ${files.length - 10} more` : ''}`;
+                }
+              }
+            } catch {
+              // Can't read directory, skip suggestion
+            }
+          }
+        } catch {
+          // Directory doesn't exist
+          suggestion = `\n  Directory ${path.dirname(filePath)} does not exist.`;
+        }
+
+        const errorMsg = `File not found: ${filePath}${suggestion}`;
+        console.error(chalk.red(`Read error: ${errorMsg}`));
+        return {
+          error: errorMsg,
+          success: false,
+          path: absolutePath,
+        };
+      }
+
       const content = await fs.readFile(absolutePath, { encoding });
       const stats = await fs.stat(absolutePath);
 
@@ -33,9 +78,12 @@ export const readFileTool = tool({
         modified: stats.mtime.toISOString(),
       };
     } catch (error) {
-      console.error(chalk.red(`Read error: ${error.message}`));
+      const errorMsg = error.code === 'ENOENT'
+        ? `File not found: ${filePath}`
+        : error.message;
+      console.error(chalk.red(`Read error: ${errorMsg}`));
       return {
-        error: error.message,
+        error: errorMsg,
         success: false,
       };
     }
@@ -147,7 +195,7 @@ export const listDirTool = tool({
             try {
               const stats = await fs.stat(entryPath);
               item.size = stats.size;
-            } catch {}
+            } catch { }
           }
 
           results.push(item);
@@ -320,7 +368,7 @@ export const searchFilesTool = tool({
               });
             }
           }
-        } catch {}
+        } catch { }
       }
 
       await search(absolutePath);
