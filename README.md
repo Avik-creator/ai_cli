@@ -1,5 +1,9 @@
 # agentic CLI
 
+<div align="center">
+  <img src="./Agentic.png" alt="agentic CLI" width="600" />
+</div>
+
 An agentic CLI tool powered by Vercel AI SDK and AI Gateway that combines web search, PR reviews, code generation, and command execution into an intelligent development assistant. Access 100+ AI models from OpenAI, Anthropic, Google, xAI, and more through a single API key.
 
 ## Features
