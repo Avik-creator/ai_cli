@@ -12,7 +12,7 @@ const git = simpleGit();
 export const getPRInfoTool = tool({
   description:
     "Get information about a GitHub Pull Request including its diff, files changed, and comments. Use this to review PRs.",
-  parameters: z.object({
+  inputSchema: z.object({
     prUrl: z
       .string()
       .optional()
@@ -175,7 +175,7 @@ export const getPRInfoTool = tool({
 export const postPRCommentTool = tool({
   description:
     "Post a review comment on a GitHub Pull Request. Use this to provide feedback on PRs.",
-  parameters: z.object({
+  inputSchema: z.object({
     owner: z.string().describe("Repository owner"),
     repo: z.string().describe("Repository name"),
     prNumber: z.number().describe("PR number"),
@@ -247,7 +247,7 @@ export const postPRCommentTool = tool({
 export const getGitStatusTool = tool({
   description:
     "Get the current git status including branch, uncommitted changes, and recent commits.",
-  parameters: z.object({
+  inputSchema: z.object({
     includeDiff: z
       .boolean()
       .optional()

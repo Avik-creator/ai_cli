@@ -11,7 +11,7 @@ import chalk from "chalk";
 export const readFileTool = tool({
   description:
     "Read the contents of a file. Use this to examine existing code, configuration files, or any text file.",
-  parameters: z.object({
+  inputSchema: z.object({
     filePath: z.string().describe("Path to the file to read (relative or absolute)"),
     encoding: z.string().optional().default("utf-8").describe("File encoding"),
   }),
@@ -48,7 +48,7 @@ export const readFileTool = tool({
 export const writeFileTool = tool({
   description:
     "Write content to a file. Use this to create new files or update existing ones. Creates directories if needed.",
-  parameters: z.object({
+  inputSchema: z.object({
     filePath: z.string().describe("Path to the file to write (relative or absolute)"),
     content: z.string().describe("Content to write to the file"),
     createDirs: z
@@ -92,7 +92,7 @@ export const writeFileTool = tool({
 export const listDirTool = tool({
   description:
     "List contents of a directory. Use this to explore the file structure of a project.",
-  parameters: z.object({
+  inputSchema: z.object({
     dirPath: z
       .string()
       .optional()
@@ -186,7 +186,7 @@ export const listDirTool = tool({
 export const executeCommandTool = tool({
   description:
     "Execute a shell command. Use this to run build commands, install packages, run tests, or execute scripts. Be careful with destructive commands.",
-  parameters: z.object({
+  inputSchema: z.object({
     command: z.string().describe("The command to execute"),
     cwd: z
       .string()
@@ -276,7 +276,7 @@ export const executeCommandTool = tool({
 export const searchFilesTool = tool({
   description:
     "Search for files by name pattern. Use this to find specific files in a project.",
-  parameters: z.object({
+  inputSchema: z.object({
     pattern: z
       .string()
       .describe("File name pattern to search for (e.g., '*.ts', 'package.json')"),
@@ -349,7 +349,7 @@ export const searchFilesTool = tool({
 export const createProjectTool = tool({
   description:
     "Create a project with multiple files and directories at once. Use this to scaffold new projects or add features.",
-  parameters: z.object({
+  inputSchema: z.object({
     basePath: z
       .string()
       .optional()

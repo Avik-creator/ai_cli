@@ -10,7 +10,7 @@ import chalk from "chalk";
 export const webSearchTool = tool({
   description:
     "Search the web using Exa AI. Use this to find current information, documentation, news, research papers, and more.",
-  parameters: z.object({
+  inputSchema: z.object({
     query: z
       .string()
       .describe("The search query. Be specific and include relevant keywords."),
@@ -126,7 +126,7 @@ export const webSearchTool = tool({
 export const getContentsTool = tool({
   description:
     "Fetch and extract content from specific URLs. Use this when you have URLs and need their full content.",
-  parameters: z.object({
+  inputSchema: z.object({
     urls: z
       .array(z.string())
       .describe("Array of URLs to fetch content from (max 10)"),
