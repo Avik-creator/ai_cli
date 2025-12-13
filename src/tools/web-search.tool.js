@@ -24,6 +24,11 @@ export const webSearchTool = tool({
       .optional()
       .default(5)
       .describe("Number of results to return (1-25)"),
+    // Support both camelCase and snake_case for compatibility
+    num_results: z
+      .number()
+      .optional()
+      .describe("Number of results to return (1-25) - alias for numResults"),
     category: z
       .enum([
         "company",
@@ -48,15 +53,18 @@ export const webSearchTool = tool({
       .optional()
       .default(true)
       .describe("Whether to include AI-generated summaries"),
-  }),
+  }).passthrough(), // Allow additional properties for compatibility
   execute: async ({
     query,
     type = "auto",
-    numResults = 5,
+    numResults,
+    num_results,
     category,
     includeText = true,
     includeSummary = true,
   }) => {
+    // Use num_results if provided, otherwise numResults, default to 5
+    const resultsCount = num_results ?? numResults ?? 5;
     const apiKey = await getApiKey("EXA_API_KEY");
 
     if (!apiKey) {
@@ -73,7 +81,7 @@ export const webSearchTool = tool({
       const requestBody = {
         query,
         type,
-        numResults: Math.min(numResults, 25),
+        numResults: Math.min(resultsCount, 25),
         contents: {},
       };
 

@@ -267,11 +267,20 @@ export class AIService {
 
   /**
    * Install provider package using bun add
+   * For AI SDK 5 compatibility, installs @ai-sdk/* packages at version 2.0.0 or later
    */
   async installProviderPackage(packageName) {
     return new Promise((resolve, reject) => {
-      // Use bun add to install the package
-      const bun = spawn("bun", ["add", packageName], {
+      // For @ai-sdk packages, ensure we install v2.0.0+ for AI SDK 5 compatibility
+      let installCommand = ["add"];
+      if (packageName.startsWith("@ai-sdk/")) {
+        // Install latest version (which should be 2.0.0+ for AI SDK 5)
+        installCommand.push(`${packageName}@latest`);
+      } else {
+        installCommand.push(packageName);
+      }
+
+      const bun = spawn("bun", installCommand, {
         stdio: "inherit",
         shell: true,
         cwd: process.cwd(), // Install in current project directory
