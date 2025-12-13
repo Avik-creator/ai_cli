@@ -33,13 +33,55 @@ export async function getStoredKeys() {
 }
 
 /**
- * Store API key
+ * Update .env file with a key-value pair
+ */
+async function updateEnvFile(key, value) {
+  try {
+    const envPath = join(process.cwd(), ".env");
+    let envContent = "";
+
+    try {
+      envContent = await fs.readFile(envPath, "utf-8");
+    } catch {
+      // .env file doesn't exist, create it
+    }
+
+    const lines = envContent.split("\n");
+    let found = false;
+    const updatedLines = lines
+      .filter((line) => line.trim() !== "") // Remove empty lines temporarily
+      .map((line) => {
+        if (line.startsWith(`${key}=`)) {
+          found = true;
+          return `${key}=${value}`;
+        }
+        return line;
+      });
+
+    if (!found) {
+      updatedLines.push(`${key}=${value}`);
+    }
+
+    // Write back with proper formatting
+    const content = updatedLines.join("\n") + (updatedLines.length > 0 ? "\n" : "");
+    await fs.writeFile(envPath, content, "utf-8");
+  } catch (error) {
+    // Silently fail if we can't write to .env (e.g., permissions)
+    // The key is still stored in the JSON file
+  }
+}
+
+/**
+ * Store API key (both in JSON and .env file)
  */
 export async function storeApiKey(name, value) {
   await ensureConfigDir();
   const keys = await getStoredKeys();
   keys[name] = value;
   await fs.writeFile(KEYS_FILE, JSON.stringify(keys, null, 2), "utf-8");
+  
+  // Also write to .env file
+  await updateEnvFile(name, value);
 }
 
 /**
@@ -263,6 +305,8 @@ export async function getCurrentProvider() {
  */
 export async function setCurrentProvider(providerId) {
   await storeApiKey("AGENTICAI_PROVIDER", providerId);
+  // Also update .env file
+  await updateEnvFile("AGENTICAI_PROVIDER", providerId);
 }
 
 /**
