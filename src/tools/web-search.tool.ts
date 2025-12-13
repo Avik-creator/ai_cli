@@ -1,7 +1,31 @@
 import { tool } from "ai";
 import { z } from "zod";
-import { getApiKey } from "../config/env.js";
+import { getApiKey } from "../config/env.ts";
 import chalk from "chalk";
+
+interface SearchResult {
+  url: string;
+  title: string;
+  summary?: string;
+  highlights?: string[];
+  text?: string;
+  publishedDate?: string;
+  author?: string;
+}
+
+interface WebSearchResponse {
+  success: boolean;
+  query?: string;
+  results?: SearchResult[];
+  searchType?: string;
+  error?: string;
+}
+
+interface ContentsResponse {
+  success: boolean;
+  results?: SearchResult[];
+  error?: string;
+}
 
 /**
  * Exa Web Search Tool
@@ -39,7 +63,7 @@ export const webSearchTool = tool({
       .optional()
       .describe("Filter results by category"),
   }),
-  execute: async ({ query, type = "auto", numResults = 5, category }) => {
+  execute: async ({ query, type = "auto", numResults = 5, category }): Promise<WebSearchResponse> => {
     const apiKey = await getApiKey("EXA_API_KEY");
 
     if (!apiKey) {
@@ -59,7 +83,7 @@ export const webSearchTool = tool({
     try {
       console.log(chalk.cyan(`\n🔍 Searching: "${query}"...`));
 
-      const requestBody = {
+      const requestBody: Record<string, unknown> = {
         query: query.trim(),
         type,
         numResults: Math.min(Math.max(1, numResults), 100),
@@ -92,7 +116,18 @@ export const webSearchTool = tool({
         throw new Error(`Exa API error: ${response.status} - ${errorText}`);
       }
 
-      const data = await response.json();
+      const data = await response.json() as {
+        results?: Array<{
+          url: string;
+          title: string;
+          summary?: string;
+          highlights?: string[];
+          text?: string;
+          publishedDate?: string;
+          author?: string;
+        }>;
+        resolvedSearchType?: string;
+      };
 
       console.log(chalk.green(`✅ Found ${data.results?.length || 0} results`));
 
@@ -111,9 +146,10 @@ export const webSearchTool = tool({
         searchType: data.resolvedSearchType || type,
       };
     } catch (error) {
-      console.error(chalk.red(`Search error: ${error.message}`));
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      console.error(chalk.red(`Search error: ${errorMessage}`));
       return {
-        error: error.message,
+        error: errorMessage,
         success: false,
       };
     }
@@ -133,7 +169,7 @@ export const getContentsTool = tool({
     includeText: z.boolean().optional().default(true),
     includeSummary: z.boolean().optional().default(true),
   }),
-  execute: async ({ urls, includeText = true, includeSummary = true }) => {
+  execute: async ({ urls, includeText = true, includeSummary = true }): Promise<ContentsResponse> => {
     const apiKey = await getApiKey("EXA_API_KEY");
 
     if (!apiKey) {
@@ -146,7 +182,7 @@ export const getContentsTool = tool({
     try {
       console.log(chalk.cyan(`\n📄 Fetching content from ${urls.length} URLs...`));
 
-      const requestBody = {
+      const requestBody: Record<string, unknown> = {
         ids: urls.slice(0, 10),
       };
 
@@ -175,7 +211,15 @@ export const getContentsTool = tool({
         throw new Error(`Exa API error: ${response.status} - ${errorText}`);
       }
 
-      const data = await response.json();
+      const data = await response.json() as {
+        results?: Array<{
+          url: string;
+          title: string;
+          summary?: string;
+          highlights?: string[];
+          text?: string;
+        }>;
+      };
 
       console.log(chalk.green(`✅ Retrieved content from ${data.results?.length || 0} URLs`));
 
@@ -190,9 +234,10 @@ export const getContentsTool = tool({
         })),
       };
     } catch (error) {
-      console.error(chalk.red(`Content fetch error: ${error.message}`));
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      console.error(chalk.red(`Content fetch error: ${errorMessage}`));
       return {
-        error: error.message,
+        error: errorMessage,
         success: false,
       };
     }

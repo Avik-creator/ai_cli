@@ -1,13 +1,15 @@
 import chalk from "chalk";
 import boxen from "boxen";
-import { text, isCancel, confirm, select, spinner } from "@clack/prompts";
+import { text, isCancel } from "@clack/prompts";
 import yoctoSpinner from "yocto-spinner";
 import { marked } from "marked";
 import { markedTerminal } from "marked-terminal";
-import { aiService } from "../services/ai.service.js";
-import { allTools, getToolsForTask, toolDescriptions } from "../tools/index.js";
-import { config, getCurrentProvider } from "../config/env.js";
-import { PROVIDERS } from "../config/providers.js";
+import { aiService } from "../services/ai.service.ts";
+import { allTools, getToolsForTask, toolDescriptions } from "../tools/index.ts";
+import { config, getCurrentProvider } from "../config/env.ts";
+import { PROVIDERS } from "../config/providers.ts";
+import type { CoreMessage } from "ai";
+import type { ToolSet } from "../tools/index.ts";
 
 // Configure marked for terminal
 marked.use(
@@ -23,7 +25,7 @@ marked.use(
     em: chalk.italic,
     codespan: chalk.yellow,
     link: chalk.blue.underline,
-  })
+  }) as Parameters<typeof marked.use>[0]
 );
 
 /**
@@ -65,10 +67,28 @@ const SYSTEM_PROMPT = `You are agentic, an intelligent CLI assistant with access
 Current working directory: ${process.cwd()}
 `;
 
+interface RunAgentOptions {
+  mode?: string;
+  singlePrompt?: string | null;
+}
+
+interface ToolCall {
+  toolName: string;
+  args: Record<string, unknown>;
+}
+
+interface ToolResult {
+  toolName: string;
+  result?: {
+    success?: boolean;
+    error?: string;
+  } | string;
+}
+
 /**
  * Display tool call information
  */
-function displayToolCall(toolCall) {
+function displayToolCall(toolCall: ToolCall): void {
   const box = boxen(
     `${chalk.cyan("Tool:")} ${chalk.bold(toolCall.toolName)}\n` +
     `${chalk.gray("Args:")} ${JSON.stringify(toolCall.args, null, 2).substring(0, 200)}${JSON.stringify(toolCall.args).length > 200 ? "..." : ""
@@ -87,8 +107,10 @@ function displayToolCall(toolCall) {
 /**
  * Display tool result summary
  */
-function displayToolResult(toolResult) {
-  const success = toolResult.result?.success !== false;
+function displayToolResult(toolResult: ToolResult): void {
+  const success = toolResult.result && typeof toolResult.result === "object"
+    ? toolResult.result.success !== false
+    : true;
   const color = success ? "green" : "red";
   const icon = success ? "✓" : "✗";
 
@@ -96,15 +118,16 @@ function displayToolResult(toolResult) {
   if (toolResult.result) {
     if (typeof toolResult.result === "string") {
       resultPreview = toolResult.result.substring(0, 100);
-    } else if (toolResult.result.error) {
+    } else if (typeof toolResult.result === "object" && toolResult.result.error) {
       resultPreview = toolResult.result.error;
     } else {
       resultPreview = "Completed successfully";
     }
   }
 
+  const colorFn = color === "green" ? chalk.green : chalk.red;
   console.log(
-    chalk[color](
+    colorFn(
       `  ${icon} ${toolResult.toolName}: ${resultPreview}${resultPreview.length >= 100 ? "..." : ""
       }`
     )
@@ -114,15 +137,16 @@ function displayToolResult(toolResult) {
 /**
  * Main agent chat loop
  */
-export async function runAgent(options = {}) {
+export async function runAgent(options: RunAgentOptions = {}): Promise<void> {
   const { mode = "all", singlePrompt = null } = options;
 
   // Initialize AI service
   try {
     await aiService.initialize();
   } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
     console.log(
-      boxen(chalk.red(`❌ ${error.message}`), {
+      boxen(chalk.red(`❌ ${errorMessage}`), {
         padding: 1,
         borderStyle: "round",
         borderColor: "red",
@@ -177,7 +201,7 @@ export async function runAgent(options = {}) {
   }
 
   // Conversation history
-  const messages = [
+  const messages: CoreMessage[] = [
     {
       role: "system",
       content: SYSTEM_PROMPT,
@@ -195,7 +219,7 @@ export async function runAgent(options = {}) {
     const userInput = await text({
       message: chalk.blue("💬 You"),
       placeholder: "Ask me anything...",
-      validate: (val) => {
+      validate: (val: string) => {
         if (!val || val.trim().length === 0) {
           return "Please enter a message";
         }
@@ -207,7 +231,7 @@ export async function runAgent(options = {}) {
       process.exit(0);
     }
 
-    const input = userInput.trim();
+    const input = (userInput as string).trim();
 
     // Handle special commands
     if (input.toLowerCase() === "exit" || input.toLowerCase() === "quit") {
@@ -238,7 +262,11 @@ export async function runAgent(options = {}) {
 /**
  * Process a single message
  */
-async function processMessage(input, messages, tools) {
+async function processMessage(
+  input: string,
+  messages: CoreMessage[],
+  tools: ToolSet
+): Promise<void> {
   // Add user message
   messages.push({
     role: "user",
@@ -262,11 +290,11 @@ async function processMessage(input, messages, tools) {
   try {
     let fullResponse = "";
     let isFirstChunk = true;
-    const toolCallsProcessed = [];
+    const toolCallsProcessed: ToolCall[] = [];
 
     const result = await aiService.sendMessage(
       messages,
-      (chunk) => {
+      (chunk: string) => {
         if (isFirstChunk) {
           spin.stop();
           console.log(chalk.green.bold("\n🤖 agentic:"));
@@ -276,13 +304,13 @@ async function processMessage(input, messages, tools) {
         fullResponse += chunk;
       },
       tools,
-      (toolCall) => {
+      (toolCall: unknown) => {
         if (isFirstChunk) {
           spin.stop();
           isFirstChunk = false;
         }
-        displayToolCall(toolCall);
-        toolCallsProcessed.push(toolCall);
+        displayToolCall(toolCall as ToolCall);
+        toolCallsProcessed.push(toolCall as ToolCall);
       },
       { maxSteps: 15 }
     );
@@ -291,7 +319,7 @@ async function processMessage(input, messages, tools) {
     if (result.toolResults && result.toolResults.length > 0) {
       console.log(chalk.gray("\n📊 Tool Results:"));
       for (const tr of result.toolResults) {
-        displayToolResult(tr);
+        displayToolResult(tr as ToolResult);
       }
     }
 
@@ -315,8 +343,9 @@ async function processMessage(input, messages, tools) {
     console.log("");
   } catch (error) {
     spin.stop();
+    const errorMessage = error instanceof Error ? error.message : String(error);
     console.log(
-      boxen(chalk.red(`❌ Error: ${error.message}`), {
+      boxen(chalk.red(`❌ Error: ${errorMessage}`), {
         padding: 1,
         margin: 1,
         borderStyle: "round",
@@ -329,7 +358,7 @@ async function processMessage(input, messages, tools) {
 /**
  * Show help
  */
-function showHelp() {
+function showHelp(): void {
   console.log(
     boxen(
       `${chalk.bold.cyan("Commands:")}\n\n` +
@@ -357,7 +386,7 @@ function showHelp() {
 /**
  * Show available tools
  */
-function showTools() {
+function showTools(): void {
   let output = "";
   for (const category of toolDescriptions) {
     output += `${chalk.bold.cyan(category.category)}\n`;

@@ -19,16 +19,23 @@ import { runAgent } from "./agent/agent.js";
 
 dotenv.config();
 
-async function main() {
+async function main(): Promise<void> {
   // Display banner
-  console.log(
-    chalk.cyan(
-      figlet.textSync("agentic", {
-        font: "Standard",
-        horizontalLayout: "default",
-      })
-    )
-  );
+  try {
+    console.log(
+      chalk.cyan(
+        figlet.textSync("agentic", {
+          font: "Standard",
+          horizontalLayout: "default",
+        })
+      )
+    );
+  } catch (error) {
+    // Fallback if font can't be loaded (e.g., in bundled version)
+    console.log(chalk.cyan.bold("\n  ╔═══════════════════════════════════╗"));
+    console.log(chalk.cyan.bold("  ║         agentic CLI             ║"));
+    console.log(chalk.cyan.bold("  ╚═══════════════════════════════════╝\n"));
+  }
   console.log(
     chalk.gray(
       "  An agentic CLI for web search, PR reviews, code generation & more\n"
@@ -62,10 +69,11 @@ async function main() {
   await program.parseAsync();
 }
 
-main().catch((error) => {
-  console.error(chalk.red("\n❌ Error:"), error.message);
+main().catch((error: unknown) => {
+  const errorMessage = error instanceof Error ? error.message : String(error);
+  console.error(chalk.red("\n❌ Error:"), errorMessage);
   if (process.env.DEBUG) {
-    console.error(error.stack);
+    console.error(error instanceof Error ? error.stack : error);
   }
   process.exit(1);
 });

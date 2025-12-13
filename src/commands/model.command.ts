@@ -2,14 +2,14 @@ import { Command } from "commander";
 import chalk from "chalk";
 import boxen from "boxen";
 import { select, isCancel, intro, outro, confirm } from "@clack/prompts";
-import { AVAILABLE_MODELS, getModelsByProvider, config, getCurrentProvider } from "../config/env.js";
-import { PROVIDERS, PROVIDER_MODELS } from "../config/providers.js";
-import { aiService } from "../services/ai.service.js";
+import { AVAILABLE_MODELS, getModelsByProvider, config, getCurrentProvider, storeModel } from "../config/env.ts";
+import { PROVIDERS, PROVIDER_MODELS, type Model } from "../config/providers.ts";
+import { aiService } from "../services/ai.service.ts";
 
 /**
  * List all available models
  */
-async function listAction() {
+async function listAction(): Promise<void> {
   const currentProviderId = await getCurrentProvider();
   const provider = PROVIDERS[currentProviderId];
 
@@ -18,7 +18,7 @@ async function listAction() {
 
   if (currentProviderId === "gateway") {
     // Gateway: Show all models grouped by provider
-    const providers = [...new Set(AVAILABLE_MODELS.map((m) => m.provider))].sort();
+    const providers = [...new Set(AVAILABLE_MODELS.map((m) => m.provider).filter((p): p is string => !!p))].sort();
 
     for (const providerName of providers) {
       const models = getModelsByProvider(providerName);
@@ -55,7 +55,7 @@ async function listAction() {
 /**
  * Set model interactively
  */
-async function setAction(modelId) {
+async function setAction(modelId: string | undefined): Promise<void> {
   if (!modelId) {
     // Interactive selection
     intro(chalk.bold.cyan("🤖 Model Selection"));
@@ -64,7 +64,7 @@ async function setAction(modelId) {
     const provider = PROVIDERS[currentProviderId];
     const currentModelId = config.getModel();
 
-    let modelChoice;
+    let modelChoice: string | symbol;
 
     if (currentProviderId === "gateway") {
       // Gateway: Show all models with provider filtering option
@@ -80,7 +80,7 @@ async function setAction(modelId) {
 
       if (filterByProvider) {
         // Two-step: Provider first, then model
-        const providers = [...new Set(AVAILABLE_MODELS.map((m) => m.provider))].sort();
+        const providers = [...new Set(AVAILABLE_MODELS.map((m) => m.provider).filter((p): p is string => !!p))].sort();
         const providerChoice = await select({
           message: "Select a provider:",
           options: providers.map((p) => ({
@@ -95,9 +95,9 @@ async function setAction(modelId) {
           return;
         }
 
-        const models = getModelsByProvider(providerChoice);
+        const models = getModelsByProvider(providerChoice as string);
         modelChoice = await select({
-          message: `Select a model from ${providerChoice.toUpperCase()}:`,
+          message: `Select a model from ${(providerChoice as string).toUpperCase()}:`,
           options: models.map((m) => {
             const isCurrent = m.id === currentModelId;
             return {
@@ -109,8 +109,8 @@ async function setAction(modelId) {
         });
       } else {
         // Single-step: Show all models at once
-        const providers = [...new Set(AVAILABLE_MODELS.map((m) => m.provider))].sort();
-        const allModels = [];
+        const providers = [...new Set(AVAILABLE_MODELS.map((m) => m.provider).filter((p): p is string => !!p))].sort();
+        const allModels: Array<{ value: string; label: string; hint?: string }> = [];
 
         for (const providerName of providers) {
           const models = getModelsByProvider(providerName);
@@ -156,12 +156,12 @@ async function setAction(modelId) {
       return;
     }
 
-    modelId = modelChoice;
+    modelId = modelChoice as string;
   }
 
   // Validate model based on current provider
   const currentProviderId = await getCurrentProvider();
-  let model = null;
+  let model: Model | undefined = undefined;
 
   if (currentProviderId === "gateway") {
     model = AVAILABLE_MODELS.find((m) => m.id === modelId);
@@ -185,7 +185,7 @@ async function setAction(modelId) {
   // Update model
   try {
     await aiService.setModel(modelId);
-    await config.setModel(modelId); // Persist to .env file
+    await storeModel(modelId); // Persist to .env file
     const provider = PROVIDERS[currentProviderId];
 
     console.log(
@@ -207,8 +207,9 @@ async function setAction(modelId) {
       )
     );
   } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
     console.log(
-      boxen(chalk.red(`❌ Error setting model: ${error.message}`), {
+      boxen(chalk.red(`❌ Error setting model: ${errorMessage}`), {
         padding: 1,
         borderStyle: "round",
         borderColor: "red",
@@ -220,12 +221,12 @@ async function setAction(modelId) {
 /**
  * Show current model
  */
-async function currentAction() {
+async function currentAction(): Promise<void> {
   const currentModel = config.getModel();
   const currentProviderId = await getCurrentProvider();
   const provider = PROVIDERS[currentProviderId];
 
-  let model = null;
+  let model: Model | undefined = undefined;
   if (currentProviderId === "gateway") {
     model = AVAILABLE_MODELS.find((m) => m.id === currentModel);
   } else {

@@ -1,18 +1,27 @@
 {
-  "name": "agentic-cli",
+  "name": "ai-assistant-cli",
   "version": "1.0.0",
   "description": "An agentic CLI tool for web search, PR reviews, code generation, and command execution using Vercel AI SDK",
-  "main": "src/index.js",
+  "main": "dist/index.js",
   "type": "module",
   "bin": {
-    "agentic": "./src/main.js"
+    "agentic": "./dist/main.js"
   },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
   "scripts": {
-    "start": "bun run src/main.js",
-    "dev": "bun run --watch src/main.js",
-    "cli": "bun run src/main.js",
-    "chat": "bun run src/main.js chat",
-    "setup": "bun run src/main.js config setup"
+    "start": "bun run src/main.ts",
+    "dev": "bun run --watch src/main.ts",
+    "cli": "bun run src/main.ts",
+    "chat": "bun run src/main.ts chat",
+    "setup": "bun run src/main.ts config setup",
+    "build": "bun build src/main.ts --outdir dist --target bun --minify",
+    "prepublishOnly": "bun run build",
+    "typecheck": "tsc --noEmit",
+    "prepack": "bun run build"
   },
   "keywords": [
     "cli",
@@ -22,10 +31,19 @@
     "ai-gateway",
     "exa",
     "pr-review",
-    "code-generation"
+    "code-generation",
+    "bun"
   ],
-  "author": "",
+  "author": "Avik Mukherjee avikm744@gmail.com",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Avik-creator/ai_cli.git"
+  },
+  "bugs": {
+    "url": "https://github.com/Avik-creator/ai_cli/issues"
+  },
+  "homepage": "https://github.com/Avik-creator/ai_cli#readme",
   "dependencies": {
     "@ai-sdk/anthropic": "^2.0.56",
     "@ai-sdk/google": "^2.0.46",
@@ -35,6 +53,7 @@
     "@ai-sdk/xai": "^2.0.40",
     "@clack/prompts": "^0.11.0",
     "@exalabs/ai-sdk": "^1.0.5",
+    "@types/marked-terminal": "^6.1.1",
     "ai": "^5.0.89",
     "boxen": "^8.0.1",
     "chalk": "^5.6.2",
@@ -49,9 +68,11 @@
     "zod": "^4.1.12"
   },
   "devDependencies": {
-    "@types/bun": "latest"
+    "@types/bun": "latest",
+    "@types/node": "^25.0.1",
+    "typescript": "^5.9.3"
   },
   "engines": {
-    "node": ">=18.0.0"
+    "bun": ">=1.0.0"
   }
 }

@@ -2,6 +2,7 @@ import dotenv from "dotenv";
 import { homedir } from "os";
 import { join } from "path";
 import fs from "fs/promises";
+import type { Model } from "./providers.js";
 
 dotenv.config();
 
@@ -11,7 +12,7 @@ const KEYS_FILE = join(CONFIG_DIR, "api-keys.json");
 /**
  * Ensure config directory exists
  */
-async function ensureConfigDir() {
+async function ensureConfigDir(): Promise<void> {
   try {
     await fs.mkdir(CONFIG_DIR, { recursive: true });
   } catch (error) {
@@ -22,11 +23,11 @@ async function ensureConfigDir() {
 /**
  * Get stored API keys
  */
-export async function getStoredKeys() {
+export async function getStoredKeys(): Promise<Record<string, string>> {
   try {
     await ensureConfigDir();
     const data = await fs.readFile(KEYS_FILE, "utf-8");
-    return JSON.parse(data);
+    return JSON.parse(data) as Record<string, string>;
   } catch {
     return {};
   }
@@ -35,7 +36,7 @@ export async function getStoredKeys() {
 /**
  * Update .env file with a key-value pair
  */
-async function updateEnvFile(key, value) {
+async function updateEnvFile(key: string, value: string): Promise<void> {
   try {
     const envPath = join(process.cwd(), ".env");
     let envContent = "";
@@ -77,7 +78,7 @@ async function updateEnvFile(key, value) {
 /**
  * Store API key (both in JSON and .env file)
  */
-export async function storeApiKey(name, value) {
+export async function storeApiKey(name: string, value: string): Promise<void> {
   await ensureConfigDir();
   const keys = await getStoredKeys();
   keys[name] = value;
@@ -90,7 +91,7 @@ export async function storeApiKey(name, value) {
 /**
  * Get API key (from env or stored)
  */
-export async function getApiKey(name) {
+export async function getApiKey(name: string): Promise<string | undefined> {
   // First check environment variables
   const envKey = process.env[name];
   if (envKey) return envKey;
@@ -103,7 +104,7 @@ export async function getApiKey(name) {
 /**
  * Available models from Vercel AI Gateway
  */
-export const AVAILABLE_MODELS = [
+export const AVAILABLE_MODELS: Model[] = [
   { id: "xai/grok-code-fast-1", name: "Grok Code Fast 1", provider: "xai" },
   { id: "anthropic/claude-sonnet-4.5", name: "Claude Sonnet 4.5", provider: "anthropic" },
   { id: "google/gemini-2.5-flash-lite", name: "Gemini 2.5 Flash Lite", provider: "google" },
@@ -284,21 +285,21 @@ export const AVAILABLE_MODELS = [
 /**
  * Get model by ID
  */
-export function getModelById(id) {
+export function getModelById(id: string): Model | undefined {
   return AVAILABLE_MODELS.find((m) => m.id === id);
 }
 
 /**
  * Get models by provider
  */
-export function getModelsByProvider(provider) {
+export function getModelsByProvider(provider: string): Model[] {
   return AVAILABLE_MODELS.filter((m) => m.provider === provider);
 }
 
 /**
  * Get current provider
  */
-export async function getCurrentProvider() {
+export async function getCurrentProvider(): Promise<string> {
   const stored = await getApiKey("AGENTICAI_PROVIDER");
   return stored || process.env.AGENTICAI_PROVIDER || "gateway";
 }
@@ -306,7 +307,7 @@ export async function getCurrentProvider() {
 /**
  * Set current provider
  */
-export async function setCurrentProvider(providerId) {
+export async function setCurrentProvider(providerId: string): Promise<void> {
   await storeApiKey("AGENTICAI_PROVIDER", providerId);
   // Also update .env file
   await updateEnvFile("AGENTICAI_PROVIDER", providerId);
@@ -315,11 +316,40 @@ export async function setCurrentProvider(providerId) {
 /**
  * Get API key for a provider
  */
-export async function getProviderApiKey(providerId) {
-  const { PROVIDERS } = await import("./providers.js");
+export async function getProviderApiKey(providerId: string): Promise<string | undefined> {
+  const { PROVIDERS } = await import("./providers.ts");
   const provider = PROVIDERS[providerId];
-  if (!provider) return null;
+  if (!provider) return undefined;
   return await getApiKey(provider.apiKeyName);
+}
+
+/**
+ * Store model ID to .env file
+ */
+export async function storeModel(modelId: string): Promise<void> {
+  const envPath = join(process.cwd(), ".env");
+  let envContent = "";
+  try {
+    envContent = await fs.readFile(envPath, "utf-8");
+  } catch (error) {
+    // .env file might not exist, create it later
+  }
+
+  const lines = envContent.split("\n");
+  let modelFound = false;
+  const newLines = lines.map((line) => {
+    if (line.startsWith("AGENTICAI_MODEL=")) {
+      modelFound = true;
+      return `AGENTICAI_MODEL=${modelId}`;
+    }
+    return line;
+  });
+
+  if (!modelFound) {
+    newLines.push(`AGENTICAI_MODEL=${modelId}`);
+  }
+
+  await fs.writeFile(envPath, newLines.join("\n"), "utf-8");
 }
 
 /**
@@ -332,7 +362,7 @@ export const config = {
   async getGatewayApiKey() {
     return await getApiKey("AI_GATEWAY_API_KEY");
   },
-  async getProviderApiKey(providerId) {
+  async getProviderApiKey(providerId: string) {
     return await getProviderApiKey(providerId);
   },
   async getExaApiKey() {
@@ -344,7 +374,7 @@ export const config = {
   getModel() {
     return process.env.AGENTICAI_MODEL || "openai/gpt-5-mini";
   },
-  async setModel(modelId) {
+  async setModel(modelId: string) {
     // Update environment variable for current session
     process.env.AGENTICAI_MODEL = modelId;
 

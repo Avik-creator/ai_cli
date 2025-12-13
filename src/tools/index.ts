@@ -11,11 +11,25 @@ import {
   searchFilesTool,
   createProjectTool,
 } from "./code.tool.js";
+// Tool type - using a more flexible type that accepts any Tool
+import type { Tool } from "ai";
+export type ToolSet = Record<string, Tool<any, any>>;
 
 /**
  * All tools organized by category
  */
-export const toolsByCategory = {
+export const toolsByCategory: {
+  search: { webSearch: Tool<any, any>; getContents: Tool<any, any> };
+  github: { getPRInfo: Tool<any, any>; postPRComment: Tool<any, any>; getGitStatus: Tool<any, any> };
+  code: {
+    readFile: Tool<any, any>;
+    writeFile: Tool<any, any>;
+    listDir: Tool<any, any>;
+    executeCommand: Tool<any, any>;
+    searchFiles: Tool<any, any>;
+    createProject: Tool<any, any>;
+  };
+} = {
   search: {
     webSearch: webSearchTool,
     getContents: getContentsTool,
@@ -38,7 +52,7 @@ export const toolsByCategory = {
 /**
  * All tools as a flat object (for AI SDK)
  */
-export const allTools = {
+export const allTools: ToolSet = {
   // Web Search
   webSearch: webSearchTool,
   getContents: getContentsTool,
@@ -60,7 +74,7 @@ export const allTools = {
 /**
  * Get tools by task type
  */
-export function getToolsForTask(taskType) {
+export function getToolsForTask(taskType: string): ToolSet {
   switch (taskType) {
     case "search":
       return {
@@ -124,7 +138,7 @@ export const toolDescriptions = [
       { name: "createProject", description: "Create multiple files at once" },
     ],
   },
-];
+] as const;
 
 export {
   webSearchTool,

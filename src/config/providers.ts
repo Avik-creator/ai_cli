@@ -2,7 +2,27 @@
  * Provider definitions and configurations
  */
 
-export const PROVIDERS = {
+export interface Provider {
+  id: string;
+  name: string;
+  description: string;
+  apiKeyName: string;
+  apiKeyEnv: string;
+  link: string;
+  package: string | null;
+  importPath: string | null;
+  modelPrefix: string;
+}
+
+export interface Model {
+  id: string;
+  name: string;
+  provider?: string;
+}
+
+export type ProviderId = keyof typeof PROVIDERS;
+
+export const PROVIDERS: Record<string, Provider> = {
   gateway: {
     id: "gateway",
     name: "Vercel AI Gateway",
@@ -85,21 +105,21 @@ export const PROVIDERS = {
 /**
  * Get provider by ID
  */
-export function getProvider(providerId) {
+export function getProvider(providerId: string): Provider | undefined {
   return PROVIDERS[providerId];
 }
 
 /**
  * Get all providers
  */
-export function getAllProviders() {
+export function getAllProviders(): Provider[] {
   return Object.values(PROVIDERS);
 }
 
 /**
  * Default models for each provider
  */
-export const PROVIDER_MODELS = {
+export const PROVIDER_MODELS: Record<string, Model[]> = {
   gateway: [
     { id: "openai/gpt-5-mini", name: "GPT-5 Mini", provider: "openai" },
     { id: "openai/gpt-5", name: "GPT-5", provider: "openai" },

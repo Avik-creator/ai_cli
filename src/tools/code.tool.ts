@@ -1,9 +1,79 @@
 import { tool } from "ai";
 import { z } from "zod";
-import { spawn } from "child_process";
+import { spawn, type ChildProcess } from "child_process";
 import fs from "fs/promises";
 import path from "path";
 import chalk from "chalk";
+
+interface FileReadResponse {
+  success: boolean;
+  path?: string;
+  content?: string;
+  size?: number;
+  modified?: string;
+  error?: string;
+}
+
+interface FileWriteResponse {
+  success: boolean;
+  path?: string;
+  bytesWritten?: number;
+  error?: string;
+}
+
+interface DirectoryItem {
+  name: string;
+  path: string;
+  type: "file" | "directory";
+  size?: number;
+}
+
+interface ListDirResponse {
+  success: boolean;
+  path?: string;
+  itemCount?: number;
+  items?: DirectoryItem[];
+  error?: string;
+}
+
+interface CommandResponse {
+  success: boolean;
+  exitCode?: number | null;
+  stdout?: string;
+  stderr?: string;
+  command?: string;
+  cwd?: string;
+  error?: string;
+  timedOut?: boolean;
+}
+
+interface FileMatch {
+  name: string;
+  path: string;
+}
+
+interface SearchFilesResponse {
+  success: boolean;
+  pattern?: string;
+  matches?: FileMatch[];
+  matchCount?: number;
+  truncated?: boolean;
+  error?: string;
+}
+
+interface ProjectFile {
+  path: string;
+  content: string;
+}
+
+interface CreateProjectResponse {
+  success: boolean;
+  basePath?: string;
+  created?: string[];
+  errors?: Array<{ path: string; error: string }>;
+  totalFiles?: number;
+  error?: string;
+}
 
 /**
  * Read File Tool
@@ -15,7 +85,7 @@ export const readFileTool = tool({
     filePath: z.string().describe("Path to the file to read (relative or absolute)"),
     encoding: z.string().optional().default("utf-8").describe("File encoding"),
   }),
-  execute: async ({ filePath, encoding = "utf-8" }) => {
+  execute: async ({ filePath, encoding = "utf-8" }): Promise<FileReadResponse> => {
     try {
       const absolutePath = path.resolve(process.cwd(), filePath);
       console.log(chalk.cyan(`\n📖 Reading: ${filePath}`));
@@ -65,7 +135,7 @@ export const readFileTool = tool({
         };
       }
 
-      const content = await fs.readFile(absolutePath, { encoding });
+      const content = await fs.readFile(absolutePath, { encoding: encoding as BufferEncoding });
       const stats = await fs.stat(absolutePath);
 
       console.log(chalk.green(`✅ Read ${content.length} characters`));
@@ -78,9 +148,10 @@ export const readFileTool = tool({
         modified: stats.mtime.toISOString(),
       };
     } catch (error) {
-      const errorMsg = error.code === 'ENOENT'
+      const err = error as NodeJS.ErrnoException;
+      const errorMsg = err.code === 'ENOENT'
         ? `File not found: ${filePath}`
-        : error.message;
+        : err.message || String(error);
       console.error(chalk.red(`Read error: ${errorMsg}`));
       return {
         error: errorMsg,
@@ -105,7 +176,7 @@ export const writeFileTool = tool({
       .default(true)
       .describe("Create parent directories if they don't exist"),
   }),
-  execute: async ({ filePath, content, createDirs = true }) => {
+  execute: async ({ filePath, content, createDirs = true }): Promise<FileWriteResponse> => {
     try {
       const absolutePath = path.resolve(process.cwd(), filePath);
       console.log(chalk.cyan(`\n📝 Writing: ${filePath}`));
@@ -125,9 +196,10 @@ export const writeFileTool = tool({
         bytesWritten: stats.size,
       };
     } catch (error) {
-      console.error(chalk.red(`Write error: ${error.message}`));
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      console.error(chalk.red(`Write error: ${errorMessage}`));
       return {
-        error: error.message,
+        error: errorMessage,
         success: false,
       };
     }
@@ -167,16 +239,16 @@ export const listDirTool = tool({
     recursive = false,
     maxDepth = 2,
     showHidden = false,
-  }) => {
+  }): Promise<ListDirResponse> => {
     try {
       const absolutePath = path.resolve(process.cwd(), dirPath);
       console.log(chalk.cyan(`\n📁 Listing: ${dirPath}`));
 
-      async function listDir(dir, depth = 0) {
+      async function listDir(dir: string, depth = 0): Promise<DirectoryItem[]> {
         if (depth > maxDepth) return [];
 
         const entries = await fs.readdir(dir, { withFileTypes: true });
-        const results = [];
+        const results: DirectoryItem[] = [];
 
         for (const entry of entries) {
           if (!showHidden && entry.name.startsWith(".")) continue;
@@ -185,7 +257,7 @@ export const listDirTool = tool({
           const entryPath = path.join(dir, entry.name);
           const relativePath = path.relative(absolutePath, entryPath);
 
-          const item = {
+          const item: DirectoryItem = {
             name: entry.name,
             path: relativePath || entry.name,
             type: entry.isDirectory() ? "directory" : "file",
@@ -219,9 +291,10 @@ export const listDirTool = tool({
         items,
       };
     } catch (error) {
-      console.error(chalk.red(`List error: ${error.message}`));
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      console.error(chalk.red(`List error: ${errorMessage}`));
       return {
-        error: error.message,
+        error: errorMessage,
         success: false,
       };
     }
@@ -246,7 +319,7 @@ export const executeCommandTool = tool({
       .default(60000)
       .describe("Command timeout in milliseconds (default: 60s)"),
   }),
-  execute: async ({ command, cwd, timeout = 60000 }) => {
+  execute: async ({ command, cwd, timeout = 60000 }): Promise<CommandResponse> => {
     return new Promise((resolve) => {
       const workDir = cwd ? path.resolve(process.cwd(), cwd) : process.cwd();
       console.log(chalk.cyan(`\n⚡ Executing: ${command}`));
@@ -256,18 +329,18 @@ export const executeCommandTool = tool({
         shell: true,
         cwd: workDir,
         env: { ...process.env },
-      });
+      }) as ChildProcess;
 
       let stdout = "";
       let stderr = "";
 
-      child.stdout.on("data", (data) => {
+      child.stdout?.on("data", (data: Buffer) => {
         const text = data.toString();
         stdout += text;
         process.stdout.write(chalk.gray(text));
       });
 
-      child.stderr.on("data", (data) => {
+      child.stderr?.on("data", (data: Buffer) => {
         const text = data.toString();
         stderr += text;
         process.stderr.write(chalk.yellow(text));
@@ -284,7 +357,7 @@ export const executeCommandTool = tool({
         });
       }, timeout);
 
-      child.on("close", (code) => {
+      child.on("close", (code: number | null) => {
         clearTimeout(timeoutId);
         const success = code === 0;
 
@@ -304,7 +377,7 @@ export const executeCommandTool = tool({
         });
       });
 
-      child.on("error", (error) => {
+      child.on("error", (error: Error) => {
         clearTimeout(timeoutId);
         console.error(chalk.red(`Command error: ${error.message}`));
         resolve({
@@ -335,18 +408,18 @@ export const searchFilesTool = tool({
       .describe("Directory to search in"),
     maxResults: z.number().optional().default(20).describe("Maximum results to return"),
   }),
-  execute: async ({ pattern, directory = ".", maxResults = 20 }) => {
+  execute: async ({ pattern, directory = ".", maxResults = 20 }): Promise<SearchFilesResponse> => {
     try {
       const absolutePath = path.resolve(process.cwd(), directory);
       console.log(chalk.cyan(`\n🔎 Searching for: ${pattern}`));
 
-      const matches = [];
+      const matches: FileMatch[] = [];
       const patternRegex = new RegExp(
         pattern.replace(/\*/g, ".*").replace(/\?/g, "."),
         "i"
       );
 
-      async function search(dir, depth = 0) {
+      async function search(dir: string, depth = 0): Promise<void> {
         if (depth > 10 || matches.length >= maxResults) return;
 
         try {
@@ -382,9 +455,10 @@ export const searchFilesTool = tool({
         truncated: matches.length >= maxResults,
       };
     } catch (error) {
-      console.error(chalk.red(`Search error: ${error.message}`));
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      console.error(chalk.red(`Search error: ${errorMessage}`));
       return {
-        error: error.message,
+        error: errorMessage,
         success: false,
       };
     }
@@ -412,13 +486,13 @@ export const createProjectTool = tool({
       )
       .describe("Array of files to create with their content"),
   }),
-  execute: async ({ basePath = ".", files }) => {
+  execute: async ({ basePath = ".", files }): Promise<CreateProjectResponse> => {
     try {
       const absoluteBase = path.resolve(process.cwd(), basePath);
       console.log(chalk.cyan(`\n🏗️  Creating project structure in: ${basePath}`));
 
-      const created = [];
-      const errors = [];
+      const created: string[] = [];
+      const errors: Array<{ path: string; error: string }> = [];
 
       for (const file of files) {
         try {
@@ -428,8 +502,9 @@ export const createProjectTool = tool({
           created.push(file.path);
           console.log(chalk.green(`  ✓ ${file.path}`));
         } catch (error) {
-          errors.push({ path: file.path, error: error.message });
-          console.log(chalk.red(`  ✗ ${file.path}: ${error.message}`));
+          const errorMessage = error instanceof Error ? error.message : String(error);
+          errors.push({ path: file.path, error: errorMessage });
+          console.log(chalk.red(`  ✗ ${file.path}: ${errorMessage}`));
         }
       }
 
@@ -443,9 +518,10 @@ export const createProjectTool = tool({
         totalFiles: files.length,
       };
     } catch (error) {
-      console.error(chalk.red(`Project creation error: ${error.message}`));
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      console.error(chalk.red(`Project creation error: ${errorMessage}`));
       return {
-        error: error.message,
+        error: errorMessage,
         success: false,
       };
     }

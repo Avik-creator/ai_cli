@@ -1,6 +1,11 @@
 import { Command } from "commander";
 import chalk from "chalk";
-import { runAgent } from "../agent/agent.js";
+import { runAgent } from "../agent/agent.ts";
+
+interface RunAgentOptions {
+  mode?: string;
+  singlePrompt?: string;
+}
 
 /**
  * Interactive chat command
@@ -8,7 +13,7 @@ import { runAgent } from "../agent/agent.js";
 export const chatCommand = new Command("chat")
   .description("Start an interactive AI agent chat session")
   .option("-m, --mode <mode>", "Tool mode: all, search, code, pr-review", "all")
-  .action(async (options) => {
+  .action(async (options: { mode: string }) => {
     await runAgent({ mode: options.mode });
   });
 
@@ -18,7 +23,7 @@ export const chatCommand = new Command("chat")
 export const searchCommand = new Command("search")
   .description("Search the web using Exa AI")
   .argument("<query...>", "Search query")
-  .action(async (queryParts) => {
+  .action(async (queryParts: string[]) => {
     const query = queryParts.join(" ");
     await runAgent({
       mode: "search",
@@ -33,7 +38,7 @@ export const askCommand = new Command("ask")
   .description("Ask a single question (non-interactive)")
   .argument("<question...>", "Your question")
   .option("-m, --mode <mode>", "Tool mode: all, search, code, pr-review", "all")
-  .action(async (questionParts, options) => {
+  .action(async (questionParts: string[], options: { mode: string }) => {
     const question = questionParts.join(" ");
     await runAgent({
       mode: options.mode,
@@ -48,7 +53,7 @@ export const reviewCommand = new Command("review")
   .description("Review a GitHub Pull Request")
   .argument("[pr-url]", "GitHub PR URL (optional if in git repo)")
   .option("--post", "Post the review as a comment on the PR")
-  .action(async (prUrl, options) => {
+  .action(async (prUrl: string | undefined, options: { post?: boolean }) => {
     let prompt = "Review the PR";
     if (prUrl) {
       prompt = `Review this Pull Request: ${prUrl}`;
@@ -82,7 +87,7 @@ export const generateCommand = new Command("generate")
   .alias("gen")
   .description("Generate code or project structures")
   .argument("<description...>", "Description of what to generate")
-  .action(async (descriptionParts) => {
+  .action(async (descriptionParts: string[]) => {
     const description = descriptionParts.join(" ");
     await runAgent({
       mode: "code",
@@ -102,7 +107,7 @@ Please:
 export const runCommand = new Command("run")
   .description("Run a command and help fix any errors")
   .argument("<command...>", "Command to run")
-  .action(async (commandParts) => {
+  .action(async (commandParts: string[]) => {
     const command = commandParts.join(" ");
     await runAgent({
       mode: "code",
@@ -123,7 +128,7 @@ export const fixCommand = new Command("fix")
   .description("Analyze and fix issues in your codebase")
   .argument("[file]", "Specific file to fix (optional)")
   .option("-e, --error <error>", "Specific error message to fix")
-  .action(async (file, options) => {
+  .action(async (file: string | undefined, options: { error?: string }) => {
     let prompt = "";
 
     if (file) {

@@ -11,9 +11,9 @@ import {
   getCurrentProvider,
   setCurrentProvider,
   getProviderApiKey,
-} from "../config/env.js";
-import { PROVIDERS, getAllProviders } from "../config/providers.js";
-import { spawn } from "child_process";
+} from "../config/env.ts";
+import { PROVIDERS, getAllProviders } from "../config/providers.ts";
+import { spawn, type ChildProcess } from "child_process";
 import fs from "fs/promises";
 
 /**
@@ -21,7 +21,7 @@ import fs from "fs/promises";
  * Installs in the current project directory
  * For AI SDK 5 compatibility, installs @ai-sdk/* packages at version 2.0.0 or later
  */
-function installPackage(packageName) {
+function installPackage(packageName: string): Promise<void> {
   return new Promise((resolve, reject) => {
     // For @ai-sdk packages, ensure we install v2.0.0+ for AI SDK 5 compatibility
     let installCommand = ["add"];
@@ -36,9 +36,9 @@ function installPackage(packageName) {
       stdio: "inherit",
       shell: true,
       cwd: process.cwd(), // Install in current project directory
-    });
+    }) as ChildProcess;
 
-    bun.on("close", (code) => {
+    bun.on("close", (code: number | null) => {
       if (code === 0) {
         resolve();
       } else {
@@ -46,7 +46,7 @@ function installPackage(packageName) {
       }
     });
 
-    bun.on("error", (error) => {
+    bun.on("error", (error: Error) => {
       reject(error);
     });
   });
@@ -55,7 +55,7 @@ function installPackage(packageName) {
 /**
  * Select provider
  */
-async function providerSetAction(providerId) {
+async function providerSetAction(providerId?: string): Promise<void> {
   intro(chalk.bold.cyan("🤖 Provider Selection"));
 
   const providers = getAllProviders();
@@ -148,10 +148,11 @@ async function providerSetAction(providerId) {
   if (selectedProvider.package) {
     // Try to check if package is installed
     try {
-      await import(selectedProvider.importPath);
+      await import(selectedProvider.importPath!);
       console.log(chalk.green(`\n✓ ${selectedProvider.package} is already installed`));
     } catch (error) {
-      if (error.code === "ERR_MODULE_NOT_FOUND" || error.message.includes("Cannot find module")) {
+      const err = error as NodeJS.ErrnoException;
+      if (err.code === "ERR_MODULE_NOT_FOUND" || err.message.includes("Cannot find module")) {
         console.log(
           chalk.yellow(
             `\n⚠️  ${selectedProvider.package} is not installed.`
@@ -171,14 +172,15 @@ async function providerSetAction(providerId) {
         if (installNow) {
           console.log(chalk.cyan(`\nInstalling ${selectedProvider.package}...\n`));
           try {
-            await installPackage(selectedProvider.package);
+            await installPackage(selectedProvider.package!);
             console.log(chalk.green(`\n✓ ${selectedProvider.package} installed successfully!`));
           } catch (installError) {
+            const installErr = installError as Error;
             console.log(
               chalk.red(
                 `\n❌ Failed to install ${selectedProvider.package}.\n` +
                 `Please install manually: ${chalk.cyan(`bun add ${selectedProvider.package}`)}\n` +
-                `Error: ${installError.message}`
+                `Error: ${installErr.message}`
               )
             );
           }
@@ -200,7 +202,7 @@ async function providerSetAction(providerId) {
 /**
  * Show current provider
  */
-async function providerCurrentAction() {
+async function providerCurrentAction(): Promise<void> {
   const currentProviderId = await getCurrentProvider();
   const provider = PROVIDERS[currentProviderId];
 
@@ -242,7 +244,7 @@ async function providerCurrentAction() {
 /**
  * List all providers
  */
-async function providerListAction() {
+async function providerListAction(): Promise<void> {
   console.log(chalk.bold("\n🤖 Available Providers:\n"));
 
   const currentProviderId = await getCurrentProvider();
@@ -271,7 +273,7 @@ async function providerListAction() {
 /**
  * Interactive API key setup
  */
-async function setupAction() {
+async function setupAction(): Promise<void> {
   intro(chalk.bold.cyan("🔑 agentic CLI - API Key Setup"));
 
   // First, select or confirm provider
@@ -399,7 +401,7 @@ async function setupAction() {
 /**
  * Set a specific API key
  */
-async function setAction(keyName, value) {
+async function setAction(keyName: string, value: string): Promise<void> {
   if (!keyName || !value) {
     console.log(chalk.red("Usage: agentic config set <KEY_NAME> <value>"));
     console.log(chalk.gray("\nAvailable keys:"));
@@ -416,7 +418,7 @@ async function setAction(keyName, value) {
 /**
  * List configured keys
  */
-async function listAction() {
+async function listAction(): Promise<void> {
   const storedKeys = await getStoredKeys();
   const currentProvider = await getCurrentProvider();
   const provider = PROVIDERS[currentProvider];
@@ -469,7 +471,7 @@ async function listAction() {
 /**
  * Remove a key
  */
-async function removeAction(keyName) {
+async function removeAction(keyName: string): Promise<void> {
   if (!keyName) {
     console.log(chalk.red("Usage: agentic config remove <KEY_NAME>"));
     return;
@@ -488,7 +490,7 @@ async function removeAction(keyName) {
 /**
  * Show config path
  */
-async function pathAction() {
+async function pathAction(): Promise<void> {
   const { join } = await import("path");
   const envPath = join(process.cwd(), ".env");
 
@@ -501,7 +503,7 @@ async function pathAction() {
 /**
  * Initialize .env file with template
  */
-async function initEnvAction() {
+async function initEnvAction(): Promise<void> {
   const { join } = await import("path");
   const envPath = join(process.cwd(), ".env");
 
@@ -574,7 +576,8 @@ GITHUB_TOKEN=${githubValue}
 
     outro(chalk.green("✨ Done!"));
   } catch (error) {
-    console.error(chalk.red(`Error creating .env file: ${error.message}`));
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    console.error(chalk.red(`Error creating .env file: ${errorMessage}`));
     outro(chalk.red("Failed"));
   }
 }
@@ -582,7 +585,7 @@ GITHUB_TOKEN=${githubValue}
 /**
  * Show required environment variables
  */
-async function showEnvAction() {
+async function showEnvAction(): Promise<void> {
   const currentProvider = await getCurrentProvider();
   const provider = PROVIDERS[currentProvider];
 
