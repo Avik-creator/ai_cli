@@ -85,6 +85,12 @@ agentic config set ANTHROPIC_API_KEY your_key_here
 agentic config set GROQ_API_KEY your_key_here
 # etc.
 
+# Initialize .env file with template
+agentic config init-env
+
+# Show required environment variables
+agentic config env
+
 # List all configured keys
 agentic config list
 
@@ -342,6 +348,8 @@ agentic ask "Help me..." --mode all
 |---------|-------------|
 | `agentic config setup` | Interactive API key setup wizard |
 | `agentic config set <key> <value>` | Set a specific API key |
+| `agentic config init-env` | Initialize .env file with template |
+| `agentic config env` | Show required environment variables |
 | `agentic config list` | List all configured API keys |
 | `agentic config remove <key>` | Remove a stored API key |
 | `agentic config path` | Show configuration file paths |
@@ -452,22 +460,65 @@ bun run dev
 
 ## Environment Variables
 
+The CLI supports multiple ways to configure environment variables:
+
+### Method 1: Interactive Setup (Recommended)
+```bash
+agentic config setup
+```
+This wizard guides you through:
+- Selecting an AI provider
+- Configuring provider API key
+- Setting up optional keys (Exa, GitHub)
+- All keys are automatically saved to both JSON config and `.env` file
+
+### Method 2: Initialize .env File
+```bash
+agentic config init-env
+```
+Creates a `.env` file template in your project root with all required and optional variables.
+
+### Method 3: Set Individual Keys
+```bash
+agentic config set OPENAI_API_KEY your_key_here
+agentic config set EXA_API_KEY your_key_here
+```
+Keys are automatically saved to both JSON config and `.env` file.
+
+### Method 4: Show Required Variables
+```bash
+agentic config env
+```
+Displays all required and optional environment variables with descriptions and links.
+
+### Method 5: Manual .env File
+You can also create a `.env` file manually:
+
+```env
+# AI Provider Configuration
+AGENTICAI_PROVIDER=openai
+AGENTICAI_MODEL=openai/gpt-5-mini
+
+# AI Provider API Key
+OPENAI_API_KEY=your_key_here
+
+# Optional: Exa Search API Key (for web search)
+EXA_API_KEY=your_key_here
+
+# Optional: GitHub Personal Access Token (for PR reviews)
+GITHUB_TOKEN=your_token_here
+```
+
+### Method 6: Environment Variables (Shell)
 You can also set API keys via environment variables:
 
 ```bash
-export GOOGLE_GENERATIVE_AI_API_KEY=your_key
+export OPENAI_API_KEY=your_key
 export EXA_API_KEY=your_key
 export GITHUB_TOKEN=your_token
 ```
 
-Or create a `.env` file:
-
-```env
-AI_GATEWAY_API_KEY=your_key
-EXA_API_KEY=your_key
-GITHUB_TOKEN=your_token
-AGENTICAI_MODEL=openai/gpt-5-mini
-```
+**Note:** The CLI checks environment variables first, then stored keys, then `.env` file. All methods work together!
 
 ## Architecture
 

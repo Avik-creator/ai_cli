@@ -491,7 +491,7 @@ async function removeAction(keyName) {
 async function pathAction() {
   const { join } = await import("path");
   const envPath = join(process.cwd(), ".env");
-  
+
   console.log(chalk.bold("\n📁 Configuration Paths:\n"));
   console.log(`  Config directory: ${chalk.cyan(CONFIG_DIR)}`);
   console.log(`  API keys file:    ${chalk.cyan(KEYS_FILE)}`);
@@ -504,7 +504,7 @@ async function pathAction() {
 async function initEnvAction() {
   const { join } = await import("path");
   const envPath = join(process.cwd(), ".env");
-  
+
   try {
     // Check if .env already exists
     try {
@@ -513,7 +513,7 @@ async function initEnvAction() {
         message: ".env file already exists. Overwrite?",
         initialValue: false,
       });
-      
+
       if (isCancel(overwrite) || !overwrite) {
         outro(chalk.yellow("Cancelled"));
         return;
@@ -524,7 +524,7 @@ async function initEnvAction() {
 
     const currentProvider = await getCurrentProvider();
     const provider = PROVIDERS[currentProvider];
-    
+
     // Get existing values
     const storedKeys = await getStoredKeys();
     const providerKey = provider?.apiKeyName || "OPENAI_API_KEY";
@@ -555,7 +555,7 @@ GITHUB_TOKEN=${githubValue}
 `;
 
     await fs.writeFile(envPath, envTemplate, "utf-8");
-    
+
     console.log(
       boxen(
         chalk.green("✅ .env file created successfully!\n") +
@@ -571,7 +571,7 @@ GITHUB_TOKEN=${githubValue}
     console.log(chalk.gray("  1. Fill in your API keys"));
     console.log(chalk.gray("  2. Add .env to .gitignore (if not already)"));
     console.log(chalk.gray("  3. Never commit .env to version control"));
-    
+
     outro(chalk.green("✨ Done!"));
   } catch (error) {
     console.error(chalk.red(`Error creating .env file: ${error.message}`));
@@ -585,32 +585,32 @@ GITHUB_TOKEN=${githubValue}
 async function showEnvAction() {
   const currentProvider = await getCurrentProvider();
   const provider = PROVIDERS[currentProvider];
-  
+
   console.log(chalk.bold("\n📋 Required Environment Variables:\n"));
-  
+
   console.log(chalk.cyan("Current Provider:"));
   console.log(chalk.white(`  ${provider.name} (${provider.id})\n`));
-  
+
   console.log(chalk.bold("Required:"));
   console.log(chalk.green(`  ${provider.apiKeyName}`));
   console.log(chalk.gray(`    ${provider.description}`));
   console.log(chalk.gray(`    Get one at: ${provider.link}\n`));
-  
+
   console.log(chalk.bold("Optional:"));
   console.log(chalk.yellow("  EXA_API_KEY"));
   console.log(chalk.gray("    Required for web search functionality"));
   console.log(chalk.gray("    Get one at: https://exa.ai\n"));
-  
+
   console.log(chalk.yellow("  GITHUB_TOKEN"));
   console.log(chalk.gray("    Required for PR review functionality"));
   console.log(chalk.gray("    Get one at: https://github.com/settings/tokens\n"));
-  
+
   console.log(chalk.bold("Configuration:"));
   console.log(chalk.gray("  AGENTICAI_PROVIDER"));
   console.log(chalk.gray("    Current AI provider ID\n"));
   console.log(chalk.gray("  AGENTICAI_MODEL"));
   console.log(chalk.gray("    Current AI model ID\n"));
-  
+
   console.log(chalk.bold("\n💡 Setup Methods:\n"));
   console.log(chalk.gray("  1. Interactive setup:"));
   console.log(chalk.white("     agentic config setup\n"));

@@ -48,22 +48,25 @@ async function updateEnvFile(key, value) {
 
     const lines = envContent.split("\n");
     let found = false;
-    const updatedLines = lines
-      .filter((line) => line.trim() !== "") // Remove empty lines temporarily
-      .map((line) => {
-        if (line.startsWith(`${key}=`)) {
-          found = true;
-          return `${key}=${value}`;
-        }
-        return line;
-      });
+    const updatedLines = lines.map((line) => {
+      // Check if line starts with the key (handles KEY=value format)
+      if (line.trim().startsWith(`${key}=`)) {
+        found = true;
+        return `${key}=${value}`;
+      }
+      return line;
+    });
 
     if (!found) {
+      // Add new key at the end, but preserve trailing newline
+      if (envContent && !envContent.endsWith("\n")) {
+        updatedLines.push(""); // Add empty line before new key
+      }
       updatedLines.push(`${key}=${value}`);
     }
 
     // Write back with proper formatting
-    const content = updatedLines.join("\n") + (updatedLines.length > 0 ? "\n" : "");
+    const content = updatedLines.join("\n") + "\n";
     await fs.writeFile(envPath, content, "utf-8");
   } catch (error) {
     // Silently fail if we can't write to .env (e.g., permissions)
@@ -79,7 +82,7 @@ export async function storeApiKey(name, value) {
   const keys = await getStoredKeys();
   keys[name] = value;
   await fs.writeFile(KEYS_FILE, JSON.stringify(keys, null, 2), "utf-8");
-  
+
   // Also write to .env file
   await updateEnvFile(name, value);
 }
