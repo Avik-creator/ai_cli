@@ -185,6 +185,7 @@ async function setAction(modelId) {
   // Update model
   try {
     await aiService.setModel(modelId);
+    await config.setModel(modelId); // Persist to .env file
     const provider = PROVIDERS[currentProviderId];
 
     console.log(
@@ -202,7 +203,7 @@ async function setAction(modelId) {
 
     console.log(
       chalk.gray(
-        `\nTo persist this setting, set ${chalk.cyan("AGENTICAI_MODEL=" + modelId)} in your environment or .env file.`
+        `\n✓ Model setting saved to .env file. It will be used in future sessions.`
       )
     );
   } catch (error) {

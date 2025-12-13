@@ -51,11 +51,16 @@ const SYSTEM_PROMPT = `You are agentic, an intelligent CLI assistant with access
 - Be cautious with write operations - confirm before overwriting important files
 
 ## Tool Usage Strategy:
-- Use webSearch to find documentation, solutions, or current information
+- **webSearch tool**: When using webSearch, ALWAYS provide the "query" parameter with a clear, specific search query. Example: webSearch({"query": "React CVE 2024 security vulnerabilities"})
 - Use getPRInfo before postPRComment to understand the full context
 - Use listDir and searchFiles before readFile to locate files
 - Use readFile before writeFile to understand existing code
 - Chain tools together to accomplish complex tasks
+
+## Important:
+- When a user asks about current information, news, or recent events, you MUST use the webSearch tool
+- Always include the "query" parameter when calling webSearch - extract the key search terms from the user's question
+- If a tool call fails, try again with clearer parameters
 
 Current working directory: ${process.cwd()}
 `;
@@ -305,15 +310,6 @@ async function processMessage(input, messages, tools) {
         role: "assistant",
         content: fullResponse,
       });
-    }
-
-    // Display usage if available
-    if (result.usage) {
-      console.log(
-        chalk.gray(
-          `\n📈 Tokens: ${result.usage.promptTokens} prompt + ${result.usage.completionTokens} completion = ${result.usage.totalTokens} total`
-        )
-      );
     }
 
     console.log("");

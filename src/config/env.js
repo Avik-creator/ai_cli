@@ -297,6 +297,42 @@ export const config = {
   getModel() {
     return process.env.AGENTICAI_MODEL || "openai/gpt-5-mini";
   },
+  async setModel(modelId) {
+    // Update environment variable for current session
+    process.env.AGENTICAI_MODEL = modelId;
+
+    // Try to persist to .env file in current directory
+    try {
+      const envPath = join(process.cwd(), ".env");
+      let envContent = "";
+
+      try {
+        envContent = await fs.readFile(envPath, "utf-8");
+      } catch {
+        // .env file doesn't exist, create it
+      }
+
+      // Update or add AGENTICAI_MODEL
+      const lines = envContent.split("\n");
+      let found = false;
+      const updatedLines = lines.map((line) => {
+        if (line.startsWith("AGENTICAI_MODEL=")) {
+          found = true;
+          return `AGENTICAI_MODEL=${modelId}`;
+        }
+        return line;
+      });
+
+      if (!found) {
+        updatedLines.push(`AGENTICAI_MODEL=${modelId}`);
+      }
+
+      await fs.writeFile(envPath, updatedLines.join("\n") + "\n", "utf-8");
+    } catch (error) {
+      // Silently fail if we can't write to .env (e.g., permissions)
+      // The environment variable is still set for the current session
+    }
+  },
   temperature: 0.7,
   maxTokens: 8192,
 };
