@@ -336,4 +336,29 @@ export const planCommand = new Command("plan")
           console.log(chalk.green("\n✓ No uncommitted changes"));
         }
       })
+  )
+  .addCommand(
+    new Command("run")
+      .description("Execute a plan with confirmation before changes")
+      .argument("[id]", "Plan ID (uses active plan if not specified)")
+      .action(async (id: string | undefined) => {
+        const { runAgent } = await import("../agent/agent.js");
+        
+        let planId = id;
+        
+        if (!planId) {
+          const specs = specStorage.listSpecs().filter((s) => s.status === "active");
+          if (specs.length === 0) {
+            console.log(chalk.yellow("No active plan. Specify a plan ID or activate a plan first."));
+            console.log(chalk.gray("Usage: agentic plan run <id>"));
+            return;
+          }
+          planId = specs[0].id;
+        }
+        
+        await runAgent({
+          mode: "code",
+          planId: planId,
+        });
+      })
   );

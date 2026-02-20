@@ -1,6 +1,6 @@
 import chalk from "chalk";
 import boxen from "boxen";
-import { text, isCancel } from "@clack/prompts";
+import { text, isCancel, confirm } from "@clack/prompts";
 import yoctoSpinner from "yocto-spinner";
 import { marked } from "marked";
 import { markedTerminal } from "marked-terminal";
@@ -9,6 +9,7 @@ import { allTools, getToolsForTask, toolDescriptions } from "../tools/index.ts";
 import { config, getCurrentProvider } from "../config/env.ts";
 import { PROVIDERS } from "../config/providers.ts";
 import { sessionManager } from "../services/session-manager.ts";
+import { specStorage } from "../services/planning/spec-storage.ts";
 import type { CoreMessage } from "ai";
 import type { ToolSet } from "../tools/index.ts";
 
@@ -83,6 +84,7 @@ interface RunAgentOptions {
   sessionId?: string | null;
   switchModel?: boolean;
   modelId?: string;
+  planId?: string | null;
 }
 
 interface ToolCall {
@@ -96,6 +98,211 @@ interface ToolResult {
     success?: boolean;
     error?: string;
   } | string;
+}
+
+function formatSpecForPrompt(spec: any): string {
+  let output = `# ${spec.title}\n\n`;
+  output += `## Goal\n${spec.goal}\n\n`;
+  
+  if (spec.inScope.length > 0) {
+    output += `## In Scope\n`;
+    for (const item of spec.inScope) {
+      output += `- ${item}\n`;
+    }
+    output += "\n";
+  }
+  
+  if (spec.outOfScope.length > 0) {
+    output += `## Out of Scope\n`;
+    for (const item of spec.outOfScope) {
+      output += `- ${item}\n`;
+    }
+    output += "\n";
+  }
+  
+  if (spec.fileBoundaries.length > 0) {
+    output += `## File Boundaries\n`;
+    for (const boundary of spec.fileBoundaries) {
+      output += `- ${boundary}\n`;
+    }
+    output += "\n";
+  }
+  
+  if (spec.acceptanceCriteria.length > 0) {
+    output += `## Acceptance Criteria\n`;
+    for (const criteria of spec.acceptanceCriteria) {
+      output += `- ${criteria}\n`;
+    }
+    output += "\n";
+  }
+  
+  return output;
+}
+
+async function runPlanExecution(specId: string): Promise<boolean> {
+  const spec = specStorage.getSpec(specId);
+  if (!spec) {
+    console.log(chalk.red(`Plan not found: ${specId}`));
+    return false;
+  }
+
+  console.log(
+    boxen(
+      chalk.bold.cyan("📋 Plan Execution Mode\n\n") +
+      chalk.gray("You are about to execute a plan. The AI will:\n") +
+      chalk.white("1. Analyze the codebase\n") +
+      chalk.white("2. Generate implementation steps\n") +
+      chalk.white("3. Ask for confirmation BEFORE making changes\n") +
+      chalk.white("4. Execute only after you approve"),
+      {
+        padding: 1,
+        margin: { top: 1, bottom: 1 },
+        borderStyle: "round",
+        borderColor: "yellow",
+      }
+    )
+  );
+
+  console.log(
+    boxen(
+      formatSpecForPrompt(spec),
+      {
+        padding: 1,
+        margin: { top: 1, bottom: 1 },
+        borderStyle: "round",
+        borderColor: "cyan",
+        title: "📝 Plan Details",
+      }
+    )
+  );
+
+  await aiService.initialize();
+
+  const prompt = `You are executing a plan. Your task is to:
+
+1. First, explore the codebase to understand the current structure
+2. Generate a detailed implementation plan based on the spec below
+3. Present the implementation steps clearly
+4. WAIT for user confirmation before making ANY changes
+
+## SPEC:
+${formatSpecForPrompt(spec)}
+
+## Your Response Format:
+Start by exploring the codebase, then present:
+
+### Implementation Steps
+1. [Step description]
+2. [Step description]
+...
+
+### Files to Modify
+- file1.ts
+- file2.ts
+...
+
+### Files to Create
+- new-file.ts
+...
+
+Then ask: "Should I start implementing these changes? (yes/no)"
+
+DO NOT make any changes until the user explicitly confirms.`;
+
+  const spin = yoctoSpinner({ text: "Analyzing codebase and generating plan...", color: "cyan" }).start();
+
+  let fullResponse = "";
+
+  await aiService.sendMessage(
+    [
+      {
+        role: "system",
+        content: prompt,
+      },
+    ],
+    (chunk) => {
+      if (fullResponse === "") {
+        spin.stop();
+        console.log(chalk.green.bold("\n🤖 AI Plan:\n"));
+        console.log(chalk.gray("─".repeat(60)));
+      }
+      fullResponse += chunk;
+    },
+    {},
+    undefined,
+    { maxSteps: 5 }
+  );
+
+  spin.stop();
+
+  if (fullResponse) {
+    const rendered = marked.parse(fullResponse);
+    console.log(rendered);
+  }
+
+  console.log(chalk.gray("─".repeat(60)));
+
+  const shouldImplement = await confirm({
+    message: chalk.yellow("Should I start implementing these changes?"),
+    initialValue: false,
+  });
+
+  if (!shouldImplement) {
+    console.log(chalk.yellow("\n👌 Implementation cancelled. Your code is safe.\n"));
+    return false;
+  }
+
+  console.log(chalk.green("\n✅ Starting implementation...\n"));
+
+  const implementationPrompt = `Continue from the plan above and implement all the changes. 
+
+For each file:
+1. Read the existing file first
+2. Make the necessary modifications
+3. Explain what you changed
+
+Start implementing now.`;
+
+  let implResponse = "";
+
+  await aiService.sendMessage(
+    [
+      {
+        role: "system",
+        content: prompt,
+      },
+      {
+        role: "assistant",
+        content: fullResponse,
+      },
+      {
+        role: "user",
+        content: implementationPrompt,
+      },
+    ],
+    (chunk) => {
+      if (implResponse === "") {
+        console.log(chalk.green.bold("\n🤖 Implementing...\n"));
+        console.log(chalk.gray("─".repeat(60)));
+      }
+      implResponse += chunk;
+    },
+    getToolsForTask("code"),
+    (toolCall) => {
+      displayToolCall(toolCall as ToolCall);
+    },
+    { maxSteps: 15 }
+  );
+
+  if (implResponse) {
+    const rendered = marked.parse(implResponse);
+    console.log(rendered);
+  }
+
+  console.log(chalk.gray("─".repeat(60)));
+  console.log(chalk.green.bold("\n✅ Implementation complete!\n"));
+
+  return true;
 }
 
 /**
@@ -151,7 +358,13 @@ function displayToolResult(toolResult: ToolResult): void {
  * Main agent chat loop
  */
 export async function runAgent(options: RunAgentOptions = {}): Promise<void> {
-  const { mode = "all", singlePrompt = null } = options;
+  const { mode = "all", singlePrompt = null, planId = null } = options;
+
+  // Plan execution mode
+  if (planId) {
+    await runPlanExecution(planId);
+    return;
+  }
 
   // Initialize AI service
   try {
