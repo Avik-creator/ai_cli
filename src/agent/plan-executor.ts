@@ -3,13 +3,14 @@ import boxen from "boxen";
 import yoctoSpinner from "yocto-spinner";
 import { marked } from "marked";
 import { markedTerminal } from "marked-terminal";
-import { confirm } from "@clack/prompts";
+import { confirm, text, isCancel } from "@clack/prompts";
 import { aiService } from "../services/ai.service.ts";
 import { getToolsForTask } from "../tools/index.ts";
 import { specStorage } from "../services/planning/spec-storage.ts";
 import { buildSystemPrompt, formatSpecForPrompt } from "./prompts.ts";
 import { displayToolCall, displayToolResult, displaySeparator } from "./display.ts";
 import type { ToolCall, ToolResult } from "./display.ts";
+import type { CoreMessage } from "ai";
 
 marked.use(
   markedTerminal({
@@ -230,4 +231,161 @@ Start implementing now.`;
   console.log(chalk.green.bold("\n✅ Implementation complete!\n"));
 
   return true;
+}
+
+export async function runInteractivePlanning(): Promise<void> {
+  console.log(
+    boxen(
+      chalk.bold.cyan("🎯 Interactive Planning Mode\n\n") +
+      chalk.gray("Chat with me like a coworker. Tell me what you want to build,\n") +
+      chalk.gray("and I'll help you plan and implement it step by step.\n\n") +
+      chalk.yellow("Commands during chat:\n") +
+      chalk.white("  • 'create plan' - Generate a formal plan from our discussion\n") +
+      chalk.white("  • 'let's do it' - Start implementing\n") +
+      chalk.white("  • 'show plan' - See the current plan\n") +
+      chalk.white("  • 'exit' - End the session"),
+      {
+        padding: 1,
+        margin: { top: 1, bottom: 1 },
+        borderStyle: "round",
+        borderColor: "cyan",
+      }
+    )
+  );
+
+  await aiService.initialize();
+
+  const systemPrompt = await buildSystemPrompt();
+  const messages: CoreMessage[] = [
+    {
+      role: "system",
+      content: `${systemPrompt}
+
+---
+You are in interactive planning mode. The user wants to collaborate on building something.
+- Be conversational and helpful like a coworker
+- Ask clarifying questions to understand their needs
+- When they say "create plan" or "let's do it", generate a structured plan
+- Wait for their approval before making any code changes
+- Use tools to explore the codebase when needed`,
+    },
+  ];
+
+  let currentPlan: ReturnType<typeof specStorage.createSpec> | null = null;
+
+  while (true) {
+    const userInput = await text({
+      message: chalk.blue("💬 You"),
+      placeholder: "Tell me what you want to build...",
+    });
+
+    if (isCancel(userInput)) {
+      console.log(chalk.yellow("\n👋 Goodbye!\n"));
+      process.exit(0);
+    }
+
+    const input = (userInput as string).trim();
+
+    if (input.toLowerCase() === "exit" || input.toLowerCase() === "quit") {
+      console.log(chalk.yellow("\n👋 Goodbye!\n"));
+      break;
+    }
+
+    if (input.toLowerCase() === "show plan" && currentPlan) {
+      console.log(boxen(formatSpecForPrompt(currentPlan), {
+        padding: 1,
+        borderStyle: "round",
+        borderColor: "cyan",
+        title: "📋 Current Plan",
+      }));
+      continue;
+    }
+
+    messages.push({ role: "user", content: input });
+
+    let fullResponse = "";
+    const spin = yoctoSpinner({ text: "Thinking...", color: "cyan" }).start();
+
+    const lowerInput = input.toLowerCase();
+    const shouldCreatePlan = lowerInput.includes("create plan") || lowerInput.includes("let's do it") || lowerInput.includes("lets do it");
+
+    if (shouldCreatePlan && !currentPlan) {
+      spin.stop();
+      const planPrompt = `Based on our conversation, create a structured implementation plan.
+      
+Respond with ONLY valid JSON:
+{
+  "title": "Short clear title",
+  "goal": "Detailed goal description", 
+  "inScope": ["item 1", "item 2"],
+  "outOfScope": ["excluded item"],
+  "acceptanceCriteria": ["criterion 1", "criterion 2"],
+  "fileBoundaries": ["src/..."]
+}`;
+
+      messages.push({ role: "user", content: planPrompt }, { role: "assistant", content: "" });
+
+      await aiService.sendMessage(
+        messages.slice(0, -1),
+        (chunk) => {
+          fullResponse += chunk;
+        },
+        getToolsForTask("code"),
+        undefined,
+        { maxSteps: 3 }
+      );
+
+      const jsonMatch = fullResponse.match(/\{[\s\S]*\}/);
+      if (jsonMatch) {
+        const planData = JSON.parse(jsonMatch[0]);
+        currentPlan = specStorage.createSpec(planData);
+        messages[messages.length - 1].content = fullResponse;
+
+        console.log(chalk.green.bold("\n📋 Plan created:\n"));
+        console.log(boxen(formatSpecForPrompt(currentPlan), {
+          padding: 1,
+          borderStyle: "round",
+          borderColor: "green",
+        }));
+
+        const shouldImplement = await confirm({
+          message: "Start implementing this plan?",
+          initialValue: false,
+        });
+
+        if (shouldImplement) {
+          await runPlanExecution(currentPlan.id);
+          return;
+        }
+      }
+      continue;
+    }
+
+    await aiService.sendMessage(
+      messages,
+      (chunk) => {
+        if (fullResponse === "") {
+          spin.stop();
+          console.log(chalk.green.bold("\n🤖 Assistant:\n"));
+          displaySeparator();
+        }
+        fullResponse += chunk;
+      },
+      getToolsForTask("all"),
+      (toolCall: unknown) => {
+        displayToolCall(toolCall as ToolCall);
+      },
+      { maxSteps: 10 }
+    );
+
+    spin.stop();
+
+    if (fullResponse) {
+      const rendered = marked.parse(fullResponse);
+      console.log(rendered);
+      messages.push({ role: "assistant", content: fullResponse });
+    }
+
+    displaySeparator();
+  }
 }

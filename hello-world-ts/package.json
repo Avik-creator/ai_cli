@@ -1,0 +1,14 @@
+{
+  "name": "hello-world-ts",
+  "version": "1.0.0",
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/main.js"
+  },
+  "dependencies": {
+    "@types/node": "^14.14.41"
+  },
+  "devDependencies": {
+    "typescript": "^4.5.5"
+  }
+}
