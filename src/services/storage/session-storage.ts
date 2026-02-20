@@ -111,6 +111,19 @@ class SessionStorage {
       CREATE INDEX IF NOT EXISTS idx_sessions_updated_at 
       ON sessions(updated_at DESC)
     `);
+
+    // Migration: Add is_summary column if it doesn't exist (for existing databases)
+    try {
+      this.db.run(`ALTER TABLE messages ADD COLUMN is_summary INTEGER DEFAULT 0`);
+    } catch {
+      // Column already exists, ignore
+    }
+    
+    try {
+      this.db.run(`ALTER TABLE messages ADD COLUMN compacted_at TEXT`);
+    } catch {
+      // Column already exists, ignore
+    }
   }
 
   /**
