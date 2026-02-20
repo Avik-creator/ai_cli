@@ -1,36 +1,19 @@
 import dotenv from "dotenv";
-import { homedir } from "os";
 import { join } from "path";
 import fs from "fs/promises";
 import type { Model } from "./providers.js";
+import { JsonStore } from "../utils/json-store.ts";
 
 dotenv.config();
 
-const CONFIG_DIR = join(homedir(), ".agentic-cli");
-const KEYS_FILE = join(CONFIG_DIR, "api-keys.json");
+const KEYS_FILE = "api-keys.json";
+const apiKeyStore = new JsonStore<Record<string, string>>(KEYS_FILE);
 
-/**
- * Ensure config directory exists
- */
-async function ensureConfigDir(): Promise<void> {
-  try {
-    await fs.mkdir(CONFIG_DIR, { recursive: true });
-  } catch (error) {
-    // Directory might already exist
-  }
-}
+apiKeyStore.getDefaultValue = () => ({});
 
-/**
- * Get stored API keys
- */
 export async function getStoredKeys(): Promise<Record<string, string>> {
-  try {
-    await ensureConfigDir();
-    const data = await fs.readFile(KEYS_FILE, "utf-8");
-    return JSON.parse(data) as Record<string, string>;
-  } catch {
-    return {};
-  }
+  const keys = await apiKeyStore.get();
+  return keys || {};
 }
 
 /**
@@ -79,10 +62,9 @@ async function updateEnvFile(key: string, value: string): Promise<void> {
  * Store API key (both in JSON and .env file)
  */
 export async function storeApiKey(name: string, value: string): Promise<void> {
-  await ensureConfigDir();
   const keys = await getStoredKeys();
   keys[name] = value;
-  await fs.writeFile(KEYS_FILE, JSON.stringify(keys, null, 2), "utf-8");
+  await apiKeyStore.save(keys);
 
   // Also write to .env file
   await updateEnvFile(name, value);
@@ -414,5 +396,9 @@ export const config = {
   maxTokens: 8192,
 };
 
-export { CONFIG_DIR, KEYS_FILE };
+export { KEYS_FILE };
+
+export function getConfigDir(): string {
+  return apiKeyStore.getFilePath().substring(0, apiKeyStore.getFilePath().lastIndexOf("/"));
+}
 

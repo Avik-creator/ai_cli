@@ -1,9 +1,26 @@
 import { sessionManager } from "../services/session-manager.ts";
+import { getAllSkillInstructions } from "../config/skills.ts";
 
-export function buildSystemPrompt(): string {
+export async function buildSystemPrompt(): Promise<string> {
   const personalityAddition = sessionManager.getPersonalityPromptAddition();
+  const skillInstructions = await getAllSkillInstructions();
   
-  const basePrompt = `You are agentic, an intelligent CLI assistant with access to powerful tools for development tasks.
+  let skillsSection = "";
+  if (Object.keys(skillInstructions).length > 0) {
+    skillsSection = `
+## Available Skills:
+You have access to the following skills that can help with specific tasks:
+`;
+    for (const [skillName, instructions] of Object.entries(skillInstructions)) {
+      const lines = instructions.split("\n");
+      const descLine = lines.find((l) => l.startsWith("description:"));
+      const description = descLine ? descLine.replace("description:", "").trim() : "See skill instructions for details.";
+      skillsSection += `- **${skillName}**: ${description}\n`;
+    }
+    skillsSection += "\nWhen a user asks about topics covered by these skills, use the skill instructions to provide better guidance.\n";
+  }
+  
+  const basePrompt = `You are agentic, an intelligent CLI assistant with access to powerful tools for development tasks.${skillsSection}
 
 ## Your Capabilities:
 1. **Web Search** - Search the internet for documentation, code examples, solutions, and current information using Exa AI

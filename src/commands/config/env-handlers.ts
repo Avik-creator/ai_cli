@@ -1,17 +1,17 @@
 import chalk from "chalk";
 import boxen from "boxen";
 import { confirm, isCancel, outro } from "@clack/prompts";
-import { getStoredKeys, getCurrentProvider } from "../../config/env.ts";
+import { getStoredKeys, getCurrentProvider, KEYS_FILE, getConfigDir } from "../../config/env.ts";
 import { PROVIDERS } from "../../config/providers.ts";
-import { KEYS_FILE, CONFIG_DIR } from "../../config/env.ts";
 import fs from "fs/promises";
 import path from "path";
 
 export async function pathAction(): Promise<void> {
   const envPath = path.join(process.cwd(), ".env");
+  const configDir = getConfigDir();
 
   console.log(chalk.bold("\n📁 Configuration Paths:\n"));
-  console.log(`  Config directory: ${chalk.cyan(CONFIG_DIR)}`);
+  console.log(`  Config directory: ${chalk.cyan(configDir)}`);
   console.log(`  API keys file:    ${chalk.cyan(KEYS_FILE)}`);
   console.log(`  .env file:        ${chalk.cyan(envPath)}`);
 }

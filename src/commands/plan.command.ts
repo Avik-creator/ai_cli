@@ -6,6 +6,7 @@ import { specStorage, type SpecItem } from "../services/planning/spec-storage.js
 import { diffAudit } from "../services/planning/diff-audit.js";
 import { verification } from "../services/planning/verification.js";
 import { exportService } from "../services/planning/export.js";
+import * as ui from "../utils/ui.ts";
 
 async function createSpecInteractive(): Promise<Partial<SpecItem> | null> {
   intro(chalk.bold.cyan("📋 Create New Plan"));
@@ -69,11 +70,11 @@ async function listPlans(): Promise<void> {
   const specs = specStorage.listSpecs();
 
   if (specs.length === 0) {
-    console.log(chalk.yellow("No plans found. Create one with: agentic plan create"));
+    ui.warning("No plans found. Create one with: agentic plan create");
     return;
   }
 
-  console.log(chalk.bold.cyan("\n📋 Your Plans:\n"));
+  ui.heading("📋 Your Plans");
 
   for (const spec of specs) {
     const statusColor =
@@ -88,9 +89,9 @@ async function listPlans(): Promise<void> {
     console.log(
       boxen(
         `${chalk.bold(spec.title)}\n` +
-        chalk.gray(`Goal: ${spec.goal.substring(0, 50)}${spec.goal.length > 50 ? "..." : ""}\n`) +
+        ui.dim(`Goal: ${spec.goal.substring(0, 50)}${spec.goal.length > 50 ? "..." : ""}\n`) +
         `${statusColor(spec.status.toUpperCase())} | ` +
-        chalk.gray(`${spec.inScope.length} in-scope | ${spec.acceptanceCriteria.length} criteria`),
+        ui.dim(`${spec.inScope.length} in-scope | ${spec.acceptanceCriteria.length} criteria`),
         {
           padding: { left: 1, right: 1, top: 0, bottom: 0 },
           borderStyle: "round",
@@ -98,7 +99,7 @@ async function listPlans(): Promise<void> {
         }
       )
     );
-    console.log(chalk.gray(`  ID: ${spec.id} | Updated: ${new Date(spec.updatedAt).toLocaleDateString()}\n`));
+    ui.dim(`  ID: ${spec.id} | Updated: ${new Date(spec.updatedAt).toLocaleDateString()}`);
   }
 }
 
@@ -106,14 +107,14 @@ async function showPlan(id: string): Promise<void> {
   const spec = specStorage.getSpec(id);
 
   if (!spec) {
-    console.log(chalk.red(`Plan not found: ${id}`));
+    ui.error(`Plan not found: ${id}`);
     return;
   }
 
   console.log(
     boxen(
       chalk.bold.cyan(`${spec.title}\n\n`) +
-      chalk.gray(`Goal: ${spec.goal}\n\n`) +
+      ui.dim(`Goal: ${spec.goal}\n\n`) +
       chalk.bold("In Scope:\n") +
       spec.inScope.map((s) => `  ${chalk.green("+")} ${s}`).join("\n") +
       (spec.outOfScope.length > 0
@@ -136,16 +137,16 @@ async function showPlan(id: string): Promise<void> {
     )
   );
 
-  console.log(chalk.gray(`\nID: ${spec.id}`));
-  console.log(chalk.gray(`Created: ${new Date(spec.createdAt).toLocaleString()}`));
-  console.log(chalk.gray(`Updated: ${new Date(spec.updatedAt).toLocaleString()}\n`));
+  ui.dim(`\nID: ${spec.id}`);
+  ui.dim(`Created: ${new Date(spec.createdAt).toLocaleString()}`);
+  ui.dim(`Updated: ${new Date(spec.updatedAt).toLocaleString()}`);
 }
 
 async function deletePlan(id: string): Promise<void> {
   const spec = specStorage.getSpec(id);
 
   if (!spec) {
-    console.log(chalk.red(`Plan not found: ${id}`));
+    ui.error(`Plan not found: ${id}`);
     return;
   }
 
@@ -155,36 +156,36 @@ async function deletePlan(id: string): Promise<void> {
   });
 
   if (isCancel(confirmed) || !confirmed) {
-    console.log(chalk.yellow("Deletion cancelled"));
+    ui.warning("Deletion cancelled");
     return;
   }
 
   specStorage.deleteSpec(id);
-  console.log(chalk.green(`✓ Deleted plan: ${spec.title}`));
+  ui.success(`✓ Deleted plan: ${spec.title}`);
 }
 
 async function activatePlan(id: string): Promise<void> {
   const spec = specStorage.getSpec(id);
 
   if (!spec) {
-    console.log(chalk.red(`Plan not found: ${id}`));
+    ui.error(`Plan not found: ${id}`);
     return;
   }
 
   specStorage.updateSpec(id, { status: "active" });
-  console.log(chalk.green(`✓ Activated plan: ${spec.title}`));
-  console.log(chalk.gray("\nUse 'agentic plan verify' to check your changes against this plan."));
+  ui.success(`✓ Activated plan: ${spec.title}`);
+  ui.dim("\nUse 'agentic plan verify' to check your changes against this plan.");
 }
 
 async function verifyPlan(id: string, useAI: boolean): Promise<void> {
   const result = await verification.verify(id, useAI);
 
   if (!result) {
-    console.log(chalk.red(`Plan not found: ${id}`));
+    ui.error(`Plan not found: ${id}`);
     return;
   }
 
-  console.log(chalk.bold.cyan(`\n📋 Verifying: ${result.spec.title}\n`));
+  ui.heading(`📋 Verifying: ${result.spec.title}`);
   verification.printVerificationResult({
     issues: result.issues,
     risk: result.risk,
@@ -196,14 +197,14 @@ async function verifyCurrent(useAI: boolean): Promise<void> {
   const specs = specStorage.listSpecs().filter((s) => s.status === "active");
 
   if (specs.length === 0) {
-    console.log(chalk.yellow("No active plan. Create one with: agentic plan create"));
+    ui.warning("No active plan. Create one with: agentic plan create");
     return;
   }
 
   const spec = specs[0];
   const result = await verification.verifyCurrentChanges(spec, useAI);
 
-  console.log(chalk.bold.cyan(`\n📋 Verifying against: ${spec.title}\n`));
+  ui.heading(`📋 Verifying against: ${spec.title}`);
   verification.printVerificationResult(result);
 }
 
@@ -211,7 +212,7 @@ async function addPhaseInteractive(specId: string): Promise<void> {
   const spec = specStorage.getSpec(specId);
 
   if (!spec) {
-    console.log(chalk.red(`Plan not found: ${specId}`));
+    ui.error(`Plan not found: ${specId}`);
     return;
   }
 
@@ -240,7 +241,7 @@ async function addPhaseInteractive(specId: string): Promise<void> {
     tasks: tasks ? (tasks as string).split(",").map((t) => t.trim()).filter(Boolean) : [],
   });
 
-  console.log(chalk.green(`✓ Added phase to plan: ${spec.title}`));
+  ui.success(`✓ Added phase to plan: ${spec.title}`);
 }
 
 export const planCommand = new Command("plan")
@@ -259,9 +260,9 @@ export const planCommand = new Command("plan")
         const data = await createSpecInteractive();
         if (data) {
           const spec = specStorage.createSpec(data);
-          console.log(chalk.green(`\n✓ Created plan: ${spec.title}`));
-          console.log(chalk.gray(`ID: ${spec.id}`));
-          console.log(chalk.gray(`\nActivate with: agentic plan activate ${spec.id}`));
+          ui.success(`✓ Created plan: ${spec.title}`);
+          ui.dim(`ID: ${spec.id}`);
+          ui.dim(`\nActivate with: agentic plan activate ${spec.id}`);
         }
       })
   )
@@ -321,20 +322,20 @@ export const planCommand = new Command("plan")
         const specs = specStorage.listSpecs().filter((s) => s.status === "active");
 
         if (specs.length === 0) {
-          console.log(chalk.yellow("No active plan"));
+          ui.warning("No active plan");
           return;
         }
 
         const spec = specs[0];
-        console.log(chalk.green(`Active plan: ${spec.title}`));
-        console.log(chalk.gray(`ID: ${spec.id}`));
-        console.log(chalk.gray(`Goal: ${spec.goal}`));
+        ui.success(`Active plan: ${spec.title}`);
+        ui.dim(`ID: ${spec.id}`);
+        ui.dim(`Goal: ${spec.goal}`);
 
         if (diffAudit.hasUncommittedChanges()) {
-          console.log(chalk.yellow("\n⚠️  You have uncommitted changes"));
-          console.log(chalk.gray("Run 'agentic plan verify' to check against the plan"));
+          ui.warning("\n⚠️  You have uncommitted changes");
+          ui.dim("Run 'agentic plan verify' to check against the plan");
         } else {
-          console.log(chalk.green("\n✓ No uncommitted changes"));
+          ui.success("\n✓ No uncommitted changes");
         }
       })
   )
@@ -350,8 +351,8 @@ export const planCommand = new Command("plan")
         if (!planId) {
           const specs = specStorage.listSpecs().filter((s) => s.status === "active");
           if (specs.length === 0) {
-            console.log(chalk.yellow("No active plan. Specify a plan ID or activate a plan first."));
-            console.log(chalk.gray("Usage: agentic plan run <id>"));
+            ui.warning("No active plan. Specify a plan ID or activate a plan first.");
+            ui.dim("Usage: agentic plan run <id>");
             return;
           }
           planId = specs[0].id;

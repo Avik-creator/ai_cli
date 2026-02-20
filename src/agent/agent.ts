@@ -109,13 +109,13 @@ export async function runAgent(options: RunAgentOptions = {}): Promise<void> {
     if (messages.length <= 1) {
       messages = [{
         role: "system",
-        content: buildSystemPrompt(),
+        content: await buildSystemPrompt(),
       }];
     }
   } else {
     messages = [{
       role: "system",
-      content: buildSystemPrompt(),
+      content: await buildSystemPrompt(),
     }];
   }
 

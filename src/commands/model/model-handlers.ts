@@ -5,65 +5,58 @@ import { AVAILABLE_MODELS, getModelsByProvider, config, getCurrentProvider, stor
 import { getCustomModels, addCustomModel, removeCustomModel } from "../../config/custom-models.ts";
 import { PROVIDERS, PROVIDER_MODELS, type Model } from "../../config/providers.ts";
 import { aiService } from "../../services/ai.service.ts";
+import * as ui from "../../utils/ui.ts";
 
 export async function listAction(): Promise<void> {
   const currentProviderId = await getCurrentProvider();
   const provider = PROVIDERS[currentProviderId];
   const customModels = await getCustomModels();
 
-  console.log(chalk.bold("\n📋 Available Models:\n"));
-  console.log(chalk.gray(`Current Provider: ${chalk.white(provider.name)}\n`));
+  ui.heading("📋 Available Models");
+  ui.dim(`Current Provider: ${provider.name}`);
 
   if (currentProviderId === "gateway") {
     const providers = [...new Set(AVAILABLE_MODELS.map((m) => m.provider).filter((p): p is string => !!p))].sort();
 
     for (const providerName of providers) {
       const models = getModelsByProvider(providerName);
-      console.log(chalk.cyan.bold(`\n${providerName.toUpperCase()}:`));
+      ui.subheading(`${providerName.toUpperCase()}:`);
       models.forEach((model) => {
         const isCurrent = model.id === config.getModel();
-        const marker = isCurrent ? chalk.green("✓") : " ";
-        console.log(`  ${marker} ${chalk.white(model.id)} - ${chalk.gray(model.name)}`);
+        ui.itemCurrent(`${model.id} - ${model.name}`);
       });
     }
 
     if (customModels.length > 0) {
-      console.log(chalk.cyan.bold(`\nCUSTOM MODELS:`));
+      ui.subheading("CUSTOM MODELS:");
       customModels.forEach((model) => {
         const isCurrent = model.id === config.getModel();
-        const marker = isCurrent ? chalk.green("✓") : " ";
-        console.log(`  ${marker} ${chalk.white(model.id)} - ${chalk.gray(model.name)}`);
+        ui.itemCurrent(`${model.id} - ${model.name}`);
       });
     }
   } else {
     const models = PROVIDER_MODELS[currentProviderId] || [];
     if (models.length === 0) {
-      console.log(chalk.yellow(`No models configured for ${provider.name}`));
+      ui.warning(`No models configured for ${provider.name}`);
     } else {
       models.forEach((model) => {
         const isCurrent = model.id === config.getModel();
-        const marker = isCurrent ? chalk.green("✓") : " ";
-        console.log(`  ${marker} ${chalk.white(model.id)} - ${chalk.gray(model.name)}`);
+        ui.itemCurrent(`${model.id} - ${model.name}`);
       });
     }
 
     const customForProvider = customModels.filter((m) => m.provider === currentProviderId);
     if (customForProvider.length > 0) {
-      console.log(chalk.cyan.bold(`\nCUSTOM MODELS:`));
+      ui.subheading("CUSTOM MODELS:");
       customForProvider.forEach((model) => {
         const isCurrent = model.id === config.getModel();
-        const marker = isCurrent ? chalk.green("✓") : " ";
-        console.log(`  ${marker} ${chalk.white(model.id)} - ${chalk.gray(model.name)}`);
+        ui.itemCurrent(`${model.id} - ${model.name}`);
       });
     }
   }
 
-  console.log(chalk.gray(`\nCurrent model: ${chalk.cyan(config.getModel())}`));
-  console.log(
-    chalk.gray(
-      `Set model via: ${chalk.cyan("agentic model set <model-id>")} or ${chalk.cyan("AGENTICAI_MODEL=<id>")}`
-    )
-  );
+  ui.dim(`\nCurrent model: ${config.getModel()}`);
+  ui.dim(`Set model via: agentic model set <model-id> or AGENTICAI_MODEL=<id>`);
 }
 
 export async function setAction(modelId: string | undefined): Promise<void> {
@@ -186,14 +179,8 @@ export async function setAction(modelId: string | undefined): Promise<void> {
   let model = allModels.find((m) => m.id === modelId);
 
   if (!model) {
-    console.log(
-      boxen(chalk.red(`❌ Model "${modelId}" not found`), {
-        padding: 1,
-        borderStyle: "round",
-        borderColor: "red",
-      })
-    );
-    console.log(chalk.yellow("\nRun 'agentic model list' to see available models.\n"));
+    ui.errorBox(`Model "${modelId}" not found`);
+    ui.warning("\nRun 'agentic model list' to see available models.\n");
     return;
   }
 
@@ -202,33 +189,15 @@ export async function setAction(modelId: string | undefined): Promise<void> {
     await storeModel(modelId);
     const provider = PROVIDERS[currentProviderId];
 
-    console.log(
-      boxen(
-        chalk.green(`✅ Model set to: ${chalk.bold(modelId)}\n`) +
-        chalk.gray(`Name: ${model.name}\n`) +
-        chalk.gray(`Provider: ${provider.name}`),
-        {
-          padding: 1,
-          borderStyle: "round",
-          borderColor: "green",
-        }
-      )
-    );
-
-    console.log(
-      chalk.gray(
-        `\n✓ Model setting saved to .env file. It will be used in future sessions.`
-      )
-    );
+    ui.successBox(`Model set to: ${modelId}`, {
+      title: "✅ Success",
+    });
+    ui.dim(`Name: ${model.name}`);
+    ui.dim(`Provider: ${provider.name}`);
+    ui.dim(`\n✓ Model setting saved to .env file. It will be used in future sessions.`);
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : String(error);
-    console.log(
-      boxen(chalk.red(`❌ Error setting model: ${errorMessage}`), {
-        padding: 1,
-        borderStyle: "round",
-        borderColor: "red",
-      })
-    );
+    ui.errorBox(`Error setting model: ${errorMessage}`);
   }
 }
 
@@ -317,35 +286,21 @@ export async function addAction(modelId: string, modelName: string, providerId: 
       provider: providerId,
     });
 
-    console.log(
-      boxen(
-        chalk.green(`✅ Added custom model: ${chalk.bold(modelId)}\n`) +
-        chalk.gray(`Name: ${modelName}\n`) +
-        chalk.gray(`Provider: ${providerId}`),
-        {
-          padding: 1,
-          borderStyle: "round",
-          borderColor: "green",
-        }
-      )
-    );
-
-    console.log(chalk.gray(`\nUse with: ${chalk.cyan(`agentic model set ${modelId}`)}\n`));
+    ui.successBox(`Added custom model: ${modelId}`, {
+      title: "✅ Success",
+    });
+    ui.dim(`Name: ${modelName}`);
+    ui.dim(`Provider: ${providerId}`);
+    ui.dim(`\nUse with: agentic model set ${modelId}`);
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : String(error);
-    console.log(
-      boxen(chalk.red(`❌ Error: ${errorMessage}`), {
-        padding: 1,
-        borderStyle: "round",
-        borderColor: "red",
-      })
-    );
+    ui.errorBox(`Error: ${errorMessage}`);
   }
 }
 
 export async function removeAction(modelId: string): Promise<void> {
   if (!modelId) {
-    console.log(chalk.red("Usage: agentic model remove <model-id>"));
+    ui.error("Usage: agentic model remove <model-id>");
     return;
   }
 
@@ -353,10 +308,10 @@ export async function removeAction(modelId: string): Promise<void> {
   const model = customModels.find((m) => m.id === modelId);
 
   if (!model) {
-    console.log(chalk.red(`Model "${modelId}" not found in custom models`));
-    console.log(chalk.gray("\nCustom models:"));
+    ui.error(`Model "${modelId}" not found in custom models`);
+    ui.dim("\nCustom models:");
     customModels.forEach((m) => {
-      console.log(chalk.gray(`  - ${m.id}: ${m.name}`));
+      ui.dim(`  - ${m.id}: ${m.name}`);
     });
     return;
   }
@@ -367,31 +322,30 @@ export async function removeAction(modelId: string): Promise<void> {
   });
 
   if (isCancel(confirmed) || !confirmed) {
-    console.log(chalk.yellow("Cancelled"));
+    ui.warning("Cancelled");
     return;
   }
 
   await removeCustomModel(modelId);
-  console.log(chalk.green(`✅ Removed custom model: ${model.id}`));
+  ui.success(`✅ Removed custom model: ${model.id}`);
 }
 
 export async function customListAction(): Promise<void> {
   const customModels = await getCustomModels();
 
   if (customModels.length === 0) {
-    console.log(chalk.yellow("\nNo custom models added."));
-    console.log(chalk.gray("Use: agentic model add <model-id> <model-name> <provider>\n"));
+    ui.warning("\nNo custom models added.");
+    ui.dim("Use: agentic model add <model-id> <model-name> <provider>");
     return;
   }
 
-  console.log(chalk.bold("\n📋 Custom Models:\n"));
+  ui.heading("📋 Custom Models");
 
   customModels.forEach((model) => {
     const isCurrent = model.id === config.getModel();
-    const marker = isCurrent ? chalk.green("✓") : " ";
-    console.log(`${marker} ${chalk.white(model.id)}`);
-    console.log(chalk.gray(`   Name: ${model.name}`));
-    console.log(chalk.gray(`   Provider: ${model.provider}\n`));
+    ui.itemCurrent(model.id);
+    ui.dim(`   Name: ${model.name}`);
+    ui.dim(`   Provider: ${model.provider}`);
   });
 }
 

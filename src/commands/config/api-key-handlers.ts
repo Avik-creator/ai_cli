@@ -10,7 +10,10 @@ import {
   KEYS_FILE,
 } from "../../config/env.ts";
 import { PROVIDERS } from "../../config/providers.ts";
-import fs from "fs/promises";
+import { JsonStore } from "../../utils/json-store.ts";
+import * as ui from "../../utils/ui.ts";
+
+const apiKeyStore = new JsonStore<Record<string, string>>(KEYS_FILE);
 
 export async function setupAction(): Promise<void> {
   intro(chalk.bold.cyan("🔑 agentic CLI - API Key Setup"));
@@ -18,7 +21,7 @@ export async function setupAction(): Promise<void> {
   const currentProvider = await getCurrentProvider();
   const provider = PROVIDERS[currentProvider];
 
-  console.log(chalk.bold(`\nCurrent Provider: ${provider.name}`));
+  ui.bold(`\nCurrent Provider: ${provider.name}`);
   const changeProvider = await confirm({
     message: "Change provider?",
     initialValue: false,
@@ -40,9 +43,9 @@ export async function setupAction(): Promise<void> {
 
   const providerApiKey = await getProviderApiKey(finalProvider);
   if (!providerApiKey) {
-    console.log(chalk.bold(`\n${finalProviderObj.name} API Key`));
-    console.log(chalk.gray(finalProviderObj.description));
-    console.log(chalk.gray(`Get one at: ${finalProviderObj.link}`));
+    ui.bold(`\n${finalProviderObj.name} API Key`);
+    ui.dim(finalProviderObj.description);
+    ui.dim(`Get one at: ${finalProviderObj.link}`);
 
     const value = await password({
       message: `Enter ${finalProviderObj.apiKeyName}:`,
@@ -59,9 +62,9 @@ export async function setupAction(): Promise<void> {
     }
 
     await storeApiKey(finalProviderObj.apiKeyName, value as string);
-    console.log(chalk.green(`✓ ${finalProviderObj.apiKeyName} saved`));
+    ui.success(`✓ ${finalProviderObj.apiKeyName} saved`);
   } else {
-    console.log(chalk.green(`✓ ${finalProviderObj.apiKeyName} already configured`));
+    ui.success(`✓ ${finalProviderObj.apiKeyName} already configured`);
   }
 
   const optionalKeys = [
@@ -83,13 +86,13 @@ export async function setupAction(): Promise<void> {
     const existingValue = await getApiKey(keyConfig.name);
     const hasExisting = !!existingValue;
 
-    console.log("");
-    console.log(chalk.bold(keyConfig.label));
-    console.log(chalk.gray(keyConfig.description));
-    console.log(chalk.gray(`Get one at: ${keyConfig.link}`));
+    ui.newline();
+    ui.bold(keyConfig.label);
+    ui.dim(keyConfig.description);
+    ui.dim(`Get one at: ${keyConfig.link}`);
 
     if (hasExisting) {
-      console.log(chalk.green("✓ Already configured"));
+      ui.success("✓ Already configured");
 
       const updateKey = await confirm({
         message: "Update this key?",
@@ -106,47 +109,38 @@ export async function setupAction(): Promise<void> {
     });
 
     if (isCancel(value)) {
-      console.log(chalk.yellow("Setup cancelled"));
+      ui.warning("Setup cancelled");
       return;
     }
 
     if (value) {
       await storeApiKey(keyConfig.name, value as string);
-      console.log(chalk.green(`✓ ${keyConfig.label} saved`));
+      ui.success(`✓ ${keyConfig.label} saved`);
     }
   }
 
   outro(chalk.green.bold("✨ API keys configured successfully!"));
 
-  console.log(
-    boxen(
-      chalk.white(
-        `Keys are stored in:\n${chalk.cyan(KEYS_FILE)}\n\n` +
-        `You can also set keys via environment variables\n` +
-        `or run ${chalk.cyan("agentic config set <KEY> <value>")}`
-      ),
-      {
-        padding: 1,
-        margin: { top: 1 },
-        borderStyle: "round",
-        borderColor: "gray",
-      }
-    )
+  ui.infoBox(
+    `Keys are stored in:\n${KEYS_FILE}\n\n` +
+    `You can also set keys via environment variables\n` +
+    `or run agentic config set <KEY> <value>`,
+    { borderColor: "gray" }
   );
 }
 
 export async function setAction(keyName: string, value: string): Promise<void> {
   if (!keyName || !value) {
-    console.log(chalk.red("Usage: agentic config set <KEY_NAME> <value>"));
-    console.log(chalk.gray("\nAvailable keys:"));
-    console.log(chalk.gray("  AI_GATEWAY_API_KEY"));
-    console.log(chalk.gray("  EXA_API_KEY"));
-    console.log(chalk.gray("  GITHUB_TOKEN"));
+    ui.error("Usage: agentic config set <KEY_NAME> <value>");
+    ui.dim("\nAvailable keys:");
+    ui.dim("  AI_GATEWAY_API_KEY");
+    ui.dim("  EXA_API_KEY");
+    ui.dim("  GITHUB_TOKEN");
     return;
   }
 
   await storeApiKey(keyName, value);
-  console.log(chalk.green(`✓ ${keyName} has been saved`));
+  ui.success(`✓ ${keyName} has been saved`);
 }
 
 export async function listAction(): Promise<void> {
@@ -154,11 +148,11 @@ export async function listAction(): Promise<void> {
   const currentProvider = await getCurrentProvider();
   const provider = PROVIDERS[currentProvider];
 
-  console.log(chalk.bold("\n🔑 Configured API Keys:\n"));
+  ui.heading("🔑 Configured API Keys");
 
-  console.log(chalk.cyan("Current Provider:"));
-  console.log(chalk.white(`  ${provider.name} (${provider.id})`));
-  console.log("");
+  ui.subheading("Current Provider");
+  ui.item(`${provider.name} (${provider.id})`);
+  ui.newline();
 
   const providerKey = provider.apiKeyName;
   const fromEnv = process.env[providerKey];
@@ -167,47 +161,43 @@ export async function listAction(): Promise<void> {
 
   if (value) {
     const source = fromEnv ? chalk.blue("(env)") : chalk.gray("(stored)");
-    const masked = value.substring(0, 8) + "..." + value.substring(value.length - 4);
-    console.log(chalk.green(`  ✓ ${providerKey}`));
-    console.log(chalk.gray(`    ${masked} ${source}`));
+    const masked = ui.maskApiKey(value);
+    ui.itemCheck(`${providerKey} ${masked} ${source}`, true);
   } else {
-    console.log(chalk.yellow(`  ✗ ${providerKey}`));
-    console.log(chalk.gray(`    Not configured`));
+    ui.itemCheck(`${providerKey} - Not configured`, false);
   }
 
+  ui.subheading("Optional Keys");
   const optionalKeys = ["EXA_API_KEY", "GITHUB_TOKEN"];
-  console.log(chalk.gray("\nOptional Keys:"));
   for (const name of optionalKeys) {
     const fromEnv = process.env[name];
     const fromStored = storedKeys[name];
-    const value = fromEnv || fromStored;
+    const val = fromEnv || fromStored;
 
-    if (value) {
+    if (val) {
       const source = fromEnv ? chalk.blue("(env)") : chalk.gray("(stored)");
-      const masked = value.substring(0, 8) + "..." + value.substring(value.length - 4);
-      console.log(chalk.green(`  ✓ ${name}`));
-      console.log(chalk.gray(`    ${masked} ${source}`));
+      const masked = ui.maskApiKey(val);
+      ui.itemCheck(`${name} ${masked} ${source}`, true);
     } else {
-      console.log(chalk.yellow(`  ✗ ${name}`));
-      console.log(chalk.gray(`    Not configured`));
+      ui.itemCheck(`${name} - Not configured`, false);
     }
   }
 
-  console.log(chalk.gray(`\nKeys stored in: ${KEYS_FILE}`));
+  ui.dim(`\nKeys stored in: ${KEYS_FILE}`);
 }
 
 export async function removeAction(keyName: string): Promise<void> {
   if (!keyName) {
-    console.log(chalk.red("Usage: agentic config remove <KEY_NAME>"));
+    ui.error("Usage: agentic config remove <KEY_NAME>");
     return;
   }
 
   const keys = await getStoredKeys();
   if (keys[keyName]) {
     delete keys[keyName];
-    await fs.writeFile(KEYS_FILE, JSON.stringify(keys, null, 2), "utf-8");
-    console.log(chalk.green(`✓ ${keyName} has been removed`));
+    await apiKeyStore.save(keys);
+    ui.success(`✓ ${keyName} has been removed`);
   } else {
-    console.log(chalk.yellow(`${keyName} was not stored (check env variables)`));
+    ui.warning(`${keyName} was not stored (check env variables)`);
   }
 }

@@ -9,6 +9,7 @@ import {
 } from "../../config/env.ts";
 import { PROVIDERS, getAllProviders } from "../../config/providers.ts";
 import { installPackage } from "./package-installer.js";
+import * as ui from "../../utils/ui.ts";
 
 export async function providerSetAction(providerId?: string): Promise<void> {
   const providers = getAllProviders();
@@ -17,10 +18,10 @@ export async function providerSetAction(providerId?: string): Promise<void> {
   if (providerId) {
     selectedProvider = PROVIDERS[providerId];
     if (!selectedProvider) {
-      console.log(chalk.red(`Provider "${providerId}" not found.`));
-      console.log(chalk.gray("\nAvailable providers:"));
+      ui.error(`Provider "${providerId}" not found.`);
+      ui.dim("\nAvailable providers:");
       providers.forEach((p) => {
-        console.log(chalk.gray(`  - ${p.id}: ${p.name}`));
+        ui.dim(`  - ${p.id}: ${p.name}`);
       });
       return;
     }
@@ -46,12 +47,10 @@ export async function providerSetAction(providerId?: string): Promise<void> {
 
   const apiKey = await getProviderApiKey(selectedProvider.id);
   if (!apiKey) {
-    console.log(
-      chalk.yellow(
-        `\n⚠️  ${selectedProvider.apiKeyName} is not configured.\n` +
-        `Run 'agentic config set ${selectedProvider.apiKeyName} <key>' to set it.\n` +
-        `Get your API key at: ${selectedProvider.link}`
-      )
+    ui.warning(
+      `\n⚠️  ${selectedProvider.apiKeyName} is not configured.\n` +
+      `Run 'agentic config set ${selectedProvider.apiKeyName} <key>' to set it.\n` +
+      `Get your API key at: ${selectedProvider.link}`
     );
 
     const configureNow = await confirm({
@@ -79,33 +78,25 @@ export async function providerSetAction(providerId?: string): Promise<void> {
     }
 
     await storeApiKey(selectedProvider.apiKeyName, keyValue as string);
-    console.log(chalk.green(`✓ ${selectedProvider.apiKeyName} saved`));
+    ui.success(`✓ ${selectedProvider.apiKeyName} saved`);
   }
 
   await setCurrentProvider(selectedProvider.id);
-  console.log(
-    boxen(
-      chalk.green(`✅ Provider set to: ${chalk.bold(selectedProvider.name)}\n`) +
-      chalk.gray(`Description: ${selectedProvider.description}\n`) +
-      chalk.gray(`API Key: ${selectedProvider.apiKeyName}`),
-      {
-        padding: 1,
-        borderStyle: "round",
-        borderColor: "green",
-      }
-    )
-  );
+  
+  ui.successBox(`Provider set to: ${selectedProvider.name}`, {
+    title: "✅ Success",
+  });
+  ui.dim(`Description: ${selectedProvider.description}`);
+  ui.dim(`API Key: ${selectedProvider.apiKeyName}`);
 
   if (selectedProvider.package) {
     try {
       await import(selectedProvider.importPath!);
-      console.log(chalk.green(`\n✓ ${selectedProvider.package} is already installed`));
+      ui.success(`\n✓ ${selectedProvider.package} is already installed`);
     } catch (error) {
       const err = error as NodeJS.ErrnoException;
       if (err.code === "ERR_MODULE_NOT_FOUND" || err.message.includes("Cannot find module")) {
-        console.log(
-          chalk.yellow(`\n⚠️  ${selectedProvider.package} is not installed.`)
-        );
+        ui.warning(`\n⚠️  ${selectedProvider.package} is not installed.`);
 
         const installNow = await confirm({
           message: `Install ${selectedProvider.package} now?`,
@@ -118,26 +109,22 @@ export async function providerSetAction(providerId?: string): Promise<void> {
         }
 
         if (installNow) {
-          console.log(chalk.cyan(`\nInstalling ${selectedProvider.package}...\n`));
+          ui.info(`\nInstalling ${selectedProvider.package}...`);
           try {
             await installPackage(selectedProvider.package!);
-            console.log(chalk.green(`\n✓ ${selectedProvider.package} installed successfully!`));
+            ui.success(`\n✓ ${selectedProvider.package} installed successfully!`);
           } catch (installError) {
             const installErr = installError as Error;
-            console.log(
-              chalk.red(
-                `\n❌ Failed to install ${selectedProvider.package}.\n` +
-                `Please install manually: ${chalk.cyan(`bun add ${selectedProvider.package}`)}\n` +
-                `Error: ${installErr.message}`
-              )
+            ui.error(
+              `\n❌ Failed to install ${selectedProvider.package}.\n` +
+              `Please install manually: bun add ${selectedProvider.package}\n` +
+              `Error: ${installErr.message}`
             );
           }
         } else {
-          console.log(
-            chalk.yellow(
-              `\n⚠️  Install ${selectedProvider.package} manually:\n` +
-              chalk.cyan(`  bun add ${selectedProvider.package}`)
-            )
+          ui.warning(
+            `\n⚠️  Install ${selectedProvider.package} manually:\n` +
+            `  bun add ${selectedProvider.package}`
           );
         }
       }
@@ -152,7 +139,7 @@ export async function providerCurrentAction(): Promise<void> {
   const provider = PROVIDERS[currentProviderId];
 
   if (!provider) {
-    console.log(chalk.red(`Provider "${currentProviderId}" not found.`));
+    ui.error(`Provider "${currentProviderId}" not found.`);
     return;
   }
 
@@ -163,10 +150,10 @@ export async function providerCurrentAction(): Promise<void> {
     boxen(
       `${chalk.bold("Current Provider:")}\n` +
       `${chalk.cyan(provider.name)}\n\n` +
-      `${chalk.gray("ID:")} ${provider.id}\n` +
-      `${chalk.gray("Description:")} ${provider.description}\n` +
-      `${chalk.gray("API Key:")} ${hasApiKey ? chalk.green("✓ Configured") : chalk.red("✗ Not configured")}\n` +
-      `${chalk.gray("Package:")} ${provider.package || chalk.gray("Built-in")}`,
+      `${ui.dim("ID:")} ${provider.id}\n` +
+      `${ui.dim("Description:")} ${provider.description}\n` +
+      `${ui.dim("API Key:")} ${hasApiKey ? chalk.green("✓ Configured") : chalk.red("✗ Not configured")}\n` +
+      `${ui.dim("Package:")} ${provider.package || ui.dim("Built-in")}`,
       {
         padding: 1,
         borderStyle: "round",
@@ -176,18 +163,16 @@ export async function providerCurrentAction(): Promise<void> {
   );
 
   if (!hasApiKey) {
-    console.log(
-      chalk.yellow(
-        `\n⚠️  Configure API key:\n` +
-        chalk.cyan(`  agentic config set ${provider.apiKeyName} <key>\n`) +
-        chalk.gray(`  Get it at: ${provider.link}`)
-      )
+    ui.warning(
+      `\n⚠️  Configure API key:\n` +
+      `  agentic config set ${provider.apiKeyName} <key>\n` +
+      ui.dim(`  Get it at: ${provider.link}`)
     );
   }
 }
 
 export async function providerListAction(): Promise<void> {
-  console.log(chalk.bold("\n🤖 Available Providers:\n"));
+  ui.heading("🤖 Available Providers");
 
   const currentProviderId = await getCurrentProvider();
   const providers = getAllProviders();
@@ -200,14 +185,12 @@ export async function providerListAction(): Promise<void> {
     const marker = isCurrent ? chalk.green("✓") : " ";
     const status = hasApiKey ? chalk.green("(configured)") : chalk.yellow("(not configured)");
 
-    console.log(
-      `${marker} ${chalk.bold(provider.name)} ${isCurrent ? chalk.cyan("(current)") : ""}`
-    );
-    console.log(chalk.gray(`   ${provider.description}`));
-    console.log(chalk.gray(`   API Key: ${provider.apiKeyName} ${status}`));
+    ui.item(`${marker} ${chalk.bold(provider.name)} ${isCurrent ? chalk.cyan("(current)") : ""}`);
+    ui.dim(`   ${provider.description}`);
+    ui.dim(`   API Key: ${provider.apiKeyName} ${status}`);
     if (provider.package) {
-      console.log(chalk.gray(`   Package: ${provider.package}`));
+      ui.dim(`   Package: ${provider.package}`);
     }
-    console.log("");
+    ui.newline();
   }
 }

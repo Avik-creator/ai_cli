@@ -66,6 +66,8 @@ export async function runPlanExecution(specId: string): Promise<boolean> {
 
   await aiService.initialize();
 
+  const systemPrompt = await buildSystemPrompt();
+  
   const prompt = `You are executing a plan. Your task is to:
 
 1. First, explore the codebase to understand the current structure
@@ -101,11 +103,48 @@ DO NOT make any changes until the user explicitly confirms.`;
 
   let fullResponse = "";
 
+  // Merge system prompt (with skills/tools info) with task-specific instructions
+  const combinedSystemPrompt = `${systemPrompt}
+
+---
+
+## Current Task
+You are executing a plan. Your task is to:
+
+1. First, explore the codebase to understand the current structure
+2. Generate a detailed implementation plan based on the spec below
+3. Present the implementation steps clearly
+4. WAIT for user confirmation before making ANY changes
+
+## SPEC:
+${formatSpecForPrompt(spec)}
+
+## Your Response Format:
+Start by exploring the codebase, then present:
+
+### Implementation Steps
+1. [Step description]
+2. [Step description]
+...
+
+### Files to Modify
+- file1.ts
+- file2.ts
+...
+
+### Files to Create
+- new-file.ts
+...
+
+Then ask: "Should I start implementing these changes? (yes/no)"
+
+DO NOT make any changes until the user explicitly confirms.`;
+
   await aiService.sendMessage(
     [
       {
         role: "system",
-        content: prompt,
+        content: combinedSystemPrompt,
       },
     ],
     (chunk) => {
@@ -157,7 +196,7 @@ Start implementing now.`;
     [
       {
         role: "system",
-        content: prompt,
+        content: combinedSystemPrompt,
       },
       {
         role: "assistant",
@@ -168,7 +207,7 @@ Start implementing now.`;
         content: implementationPrompt,
       },
     ],
-    (chunk) => {
+    (chunk: string) => {
       if (implResponse === "") {
         console.log(chalk.green.bold("\n🤖 Implementing...\n"));
         displaySeparator();
@@ -176,7 +215,7 @@ Start implementing now.`;
       implResponse += chunk;
     },
     getToolsForTask("code"),
-    (toolCall) => {
+    (toolCall: unknown) => {
       displayToolCall(toolCall as ToolCall);
     },
     { maxSteps: 15 }
