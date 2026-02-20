@@ -175,7 +175,8 @@ export async function setAction(modelId: string | undefined): Promise<void> {
   }
 
   const currentProviderId = await getCurrentProvider();
-  const allModels = [...AVAILABLE_MODELS, ...(await getCustomModels())];
+  const providerModels = PROVIDER_MODELS[currentProviderId] || [];
+  const allModels = [...AVAILABLE_MODELS, ...providerModels, ...(await getCustomModels())];
   let model = allModels.find((m) => m.id === modelId);
 
   if (!model) {
@@ -206,8 +207,9 @@ export async function currentAction(): Promise<void> {
   const currentProviderId = await getCurrentProvider();
   const provider = PROVIDERS[currentProviderId];
   const customModels = await getCustomModels();
+  const providerModels = PROVIDER_MODELS[currentProviderId] || [];
 
-  const allModels = [...AVAILABLE_MODELS, ...customModels];
+  const allModels = [...AVAILABLE_MODELS, ...providerModels, ...customModels];
   let model = allModels.find((m) => m.id === currentModel);
 
   if (model) {

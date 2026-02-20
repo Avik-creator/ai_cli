@@ -150,10 +150,10 @@ export async function providerCurrentAction(): Promise<void> {
     boxen(
       `${chalk.bold("Current Provider:")}\n` +
       `${chalk.cyan(provider.name)}\n\n` +
-      `${ui.dim("ID:")} ${provider.id}\n` +
-      `${ui.dim("Description:")} ${provider.description}\n` +
-      `${ui.dim("API Key:")} ${hasApiKey ? chalk.green("✓ Configured") : chalk.red("✗ Not configured")}\n` +
-      `${ui.dim("Package:")} ${provider.package || ui.dim("Built-in")}`,
+      `${chalk.gray("ID:")} ${provider.id}\n` +
+      `${chalk.gray("Description:")} ${provider.description}\n` +
+      `${chalk.gray("API Key:")} ${hasApiKey ? chalk.green("✓ Configured") : chalk.red("✗ Not configured")}\n` +
+      `${chalk.gray("Package:")} ${provider.package || chalk.gray("Built-in")}`,
       {
         padding: 1,
         borderStyle: "round",
@@ -166,7 +166,7 @@ export async function providerCurrentAction(): Promise<void> {
     ui.warning(
       `\n⚠️  Configure API key:\n` +
       `  agentic config set ${provider.apiKeyName} <key>\n` +
-      ui.dim(`  Get it at: ${provider.link}`)
+      chalk.gray(`  Get it at: ${provider.link}`)
     );
   }
 }
