@@ -5,6 +5,7 @@ import { text, confirm, select, isCancel, intro, outro } from "@clack/prompts";
 import { specStorage, type SpecItem } from "../services/planning/spec-storage.js";
 import { diffAudit } from "../services/planning/diff-audit.js";
 import { verification } from "../services/planning/verification.js";
+import { exportService } from "../services/planning/export.js";
 
 async function createSpecInteractive(): Promise<Partial<SpecItem> | null> {
   intro(chalk.bold.cyan("📋 Create New Plan"));
@@ -361,4 +362,59 @@ export const planCommand = new Command("plan")
           planId: planId,
         });
       })
+  )
+  .addCommand(
+    new Command("export")
+      .description("Export plan to file")
+      .addCommand(
+        new Command("markdown")
+          .alias("md")
+          .description("Export as Markdown")
+          .option("-o, --output <path>", "Output file path")
+          .argument("<id>", "Plan ID")
+          .action(async (id: string, options: { output?: string }) => {
+            exportService.exportPlan(id, "markdown", options.output);
+          })
+      )
+      .addCommand(
+        new Command("json")
+          .description("Export as JSON")
+          .option("-o, --output <path>", "Output file path")
+          .argument("<id>", "Plan ID")
+          .action(async (id: string, options: { output?: string }) => {
+            exportService.exportPlan(id, "json", options.output);
+          })
+      )
+  )
+  .addCommand(
+    new Command("ticket")
+      .alias("tickets")
+      .description("Generate tickets from plan")
+      .addCommand(
+        new Command("github")
+          .description("Export as GitHub Issues format")
+          .option("-o, --output <path>", "Output file path")
+          .argument("<id>", "Plan ID")
+          .action(async (id: string, options: { output?: string }) => {
+            exportService.exportTickets(id, "github", options.output);
+          })
+      )
+      .addCommand(
+        new Command("jira")
+          .description("Export as Jira Markdown")
+          .option("-o, --output <path>", "Output file path")
+          .argument("<id>", "Plan ID")
+          .action(async (id: string, options: { output?: string }) => {
+            exportService.exportTickets(id, "jira", options.output);
+          })
+      )
+      .addCommand(
+        new Command("tasks")
+          .description("Export as task list")
+          .option("-o, --output <path>", "Output file path")
+          .argument("<id>", "Plan ID")
+          .action(async (id: string, options: { output?: string }) => {
+            exportService.exportTickets(id, "tasks", options.output);
+          })
+      )
   );

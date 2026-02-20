@@ -5,3 +5,5 @@ export { diffAudit } from "./diff-audit.js";
 export type { DiffFile, DiffHunk, ScopeViolation, RiskScore, RiskyPattern } from "./diff-audit.js";
 
 export { verification } from "./verification.js";
+
+export { exportService } from "./export.js";
