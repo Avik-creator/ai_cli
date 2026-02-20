@@ -13,6 +13,8 @@ An agentic CLI tool powered by Vercel AI SDK and AI Gateway that combines web se
 - **💻 Code Generation** - Generate complete code files and project structures
 - **⚡ Command Execution** - Run shell commands and get AI help fixing errors
 - **🤖 Agentic Workflow** - Multi-step tool calling for complex tasks
+- **📋 Spec-Driven Development** - Create plans, verify changes, and execute with AI assistance
+- **🔧 Skills System** - Extend capabilities with installable skills from skills.sh
 
 ## Quick Setup
 
@@ -232,6 +234,37 @@ When you run `agentic model set` without arguments, you'll see an interactive me
 
 The current model is marked with a ✓ checkmark in the menu.
 
+**Custom Models:**
+
+Add and manage custom models for any provider:
+
+```bash
+# Add a custom model
+agentic model add <model-id> <model-name> <provider>
+agentic model add "groq/llama-4-test" "Llama 4 Test" groq
+
+# List custom models
+agentic model custom
+
+# Set a custom model as active
+agentic model set groq/llama-4-test
+
+# Remove a custom model
+agentic model remove groq/llama-4-test
+```
+
+**Model Switching:**
+
+Switch models while preserving session context:
+
+```bash
+# Switch model interactively
+agentic model switch
+
+# Switch to a specific model
+agentic model switch claude-sonnet-4.5
+```
+
 **Popular Models (Gateway):**
 - `openai/gpt-5-mini` - Fast and efficient (default)
 - `openai/gpt-5` - More capable
@@ -263,6 +296,14 @@ Start an interactive session with all tools available:
 agentic
 # or
 agentic chat
+```
+
+Continue a previous session:
+
+```bash
+# Continue a session
+agentic -s <session-id>
+agentic chat -s <session-id>
 ```
 
 ### Quick Commands
@@ -302,6 +343,143 @@ agentic fix src/index.ts --error "Cannot find module"
 agentic fix
 ```
 
+### Spec-Driven Development (Plan Mode)
+
+Create, verify, and execute implementation plans:
+
+```bash
+# List all plans
+agentic plan list
+
+# Create a new plan interactively
+agentic plan create
+
+# Create a plan from an AI prompt
+agentic plan create -a "Add user authentication with JWT"
+
+# Show plan details
+agentic plan show <plan-id>
+
+# Activate a plan for verification
+agentic plan activate <plan-id>
+
+# Check current plan status
+agentic plan status
+
+# Verify changes against active plan
+agentic plan verify
+
+# Verify with AI analysis
+agentic plan verify --ai
+
+# Execute a plan (asks for confirmation before changes)
+agentic plan run <plan-id>
+
+# Execute active plan
+agentic plan run
+
+# Create and execute plan from AI prompt
+agentic plan run -a "Create a utility function for date formatting"
+
+# Interactive planning session (chat with AI to plan together)
+agentic plan run -i
+
+# Add a phase to a plan
+agentic plan phase add <plan-id>
+
+# Delete a plan
+agentic plan delete <plan-id>
+```
+
+**Export Plans:**
+
+```bash
+# Export as Markdown
+agentic plan export markdown <plan-id>
+agentic plan export md <plan-id> -o plan.md
+
+# Export as JSON
+agentic plan export json <plan-id> -o plan.json
+```
+
+**Generate Tickets from Plans:**
+
+```bash
+# Export as GitHub Issues format
+agentic plan ticket github <plan-id>
+
+# Export as Jira format
+agentic plan ticket jira <plan-id>
+
+# Export as task list
+agentic plan ticket tasks <plan-id>
+```
+
+### Interactive Planning Session
+
+Start a collaborative planning session with the AI:
+
+```bash
+agentic plan run -i
+```
+
+This enters an interactive mode where you can:
+- Chat with the AI like a coworker about what you want to build
+- Ask clarifying questions
+- Say "create plan" or "let's do it" to generate a formal plan
+- Review and approve the plan before implementation
+
+### Skills Management
+
+Extend capabilities with installable skills:
+
+```bash
+# List installed skills
+agentic skills list
+
+# Show skill instructions
+agentic skills show <skill-name>
+
+# Add a skill from skills.sh or GitHub
+agentic skills add <repo>
+agentic skills add vercel-labs/agent-skills@vercel-react-best-practices
+```
+
+### Session Management
+
+Manage chat sessions:
+
+```bash
+# List all sessions
+agentic sessions --list
+
+# Delete a session
+agentic sessions --delete <session-id>
+```
+
+### Preferences
+
+Customize AI personality:
+
+```bash
+# Show current preferences
+agentic preferences --show
+
+# List available personalities
+agentic preferences --list-personalities
+
+# Set personality
+agentic preferences --personality friendly
+```
+
+**Available Personalities:**
+- `calm` - Peaceful, patient, and measured responses
+- `senior` - Experienced mentor with high standards
+- `friendly` - Warm, approachable, and encouraging
+- `concise` - Brief, to-the-point responses
+- `professional` - Business-appropriate, formal responses
+- `mentor` - Educational focus with teaching approach
+
 ### Tool Modes
 
 You can limit which tools are available for chat and ask commands:
@@ -336,15 +514,34 @@ agentic ask "Help me..." --mode all
 
 | Command | Description | Options |
 |---------|-------------|---------|
-| `agentic` | Start interactive chat (default action) | - |
-| `agentic chat` | Start interactive AI agent chat session | `-m, --mode <mode>` - Tool mode: `all`, `search`, `code`, `pr-review` (default: `all`) |
+| `agentic` | Start interactive chat (default action) | `-s, --session <id>` - Continue session |
+| `agentic chat` | Start interactive AI agent chat session | `-m, --mode <mode>` - Tool mode: `all`, `search`, `code`, `pr-review` (default: `all`)<br>`-s, --session <id>` - Continue session |
 | `agentic search <query...>` | Search the web using Exa AI | - |
-| `agentic ask <question...>` | Ask a single question (non-interactive) | `-m, --mode <mode>` - Tool mode: `all`, `search`, `code`, `pr-review` (default: `all`) |
+| `agentic ask <question...>` | Ask a single question (non-interactive) | `-m, --mode <mode>` - Tool mode |
 | `agentic review [pr-url]` | Review a GitHub Pull Request | `--post` - Post the review as a comment on the PR |
 | `agentic generate <description...>` | Generate code or project structures | - |
 | `agentic gen <description...>` | Alias for `generate` | - |
 | `agentic run <command...>` | Run a command and help fix any errors | - |
 | `agentic fix [file]` | Analyze and fix issues in your codebase | `-e, --error <error>` - Specific error message to fix |
+
+### Plan Commands
+
+| Command | Description | Options |
+|---------|-------------|---------|
+| `agentic plan list` | List all plans | - |
+| `agentic plan create` | Create a new plan (interactive) | `-a, --ai <prompt>` - Create from AI prompt |
+| `agentic plan show <id>` | Show plan details | - |
+| `agentic plan delete <id>` | Delete a plan | - |
+| `agentic plan activate <id>` | Activate a plan for verification | - |
+| `agentic plan verify [id]` | Verify changes against a plan | `--ai` - Use AI for deeper verification |
+| `agentic plan status` | Check current plan status | - |
+| `agentic plan run [id]` | Execute a plan with confirmation | `-a, --ai <prompt>` - Create and execute from prompt<br>`-i, --interactive` - Start interactive planning session |
+| `agentic plan phase add <id>` | Add a phase to a plan | - |
+| `agentic plan export markdown <id>` | Export plan as Markdown | `-o, --output <path>` - Output file path |
+| `agentic plan export json <id>` | Export plan as JSON | `-o, --output <path>` - Output file path |
+| `agentic plan ticket github <id>` | Export as GitHub Issues | `-o, --output <path>` - Output file path |
+| `agentic plan ticket jira <id>` | Export as Jira format | `-o, --output <path>` - Output file path |
+| `agentic plan ticket tasks <id>` | Export as task list | `-o, --output <path>` - Output file path |
 
 ### Configuration Commands
 
@@ -386,12 +583,40 @@ agentic ask "Help me..." --mode all
 | `agentic model set <model-id>` | Set model directly (e.g., `gpt-5-mini`, `claude-sonnet-4.5`) |
 | `agentic model current` | Show current model |
 | `agentic model show` | Alias for `current` |
+| `agentic model switch [model-id]` | Switch model with context summary |
+| `agentic model add <id> <name> <provider>` | Add a custom model |
+| `agentic model remove <model-id>` | Remove a custom model |
+| `agentic model custom` | List custom models |
+
+### Skills Commands
+
+| Command | Description |
+|---------|-------------|
+| `agentic skills list` | List installed skills |
+| `agentic skills show <skill-name>` | Show skill instructions |
+| `agentic skills add <repo>` | Add a skill from skills.sh or GitHub |
+
+### Sessions Commands
+
+| Command | Description |
+|---------|-------------|
+| `agentic sessions --list` | List all chat sessions |
+| `agentic sessions --delete <id>` | Delete a session |
+
+### Preferences Commands
+
+| Command | Description |
+|---------|-------------|
+| `agentic preferences --show` | Show current preferences |
+| `agentic preferences --list-personalities` | List available personalities |
+| `agentic preferences --personality <name>` | Set AI personality |
 
 ### Global Options
 
 All commands support:
 - `-h, --help` - Display help for command
 - `-V, --version` - Output the version number
+- `-s, --session <session-id>` - Continue an existing session
 
 ## Available Tools
 
@@ -462,6 +687,30 @@ bun install
 bun run dev
 ```
 
+### Interactive Planning
+```
+You: agentic plan run -i
+
+🎯 Interactive Planning Mode
+
+Chat with me like a coworker. Tell me what you want to build,
+and I'll help you plan and implement it step by step.
+
+Commands during chat:
+  • 'create plan' - Generate a formal plan from our discussion
+  • 'let's do it' - Start implementing
+  • 'show plan' - See the current plan
+  • 'exit' - End the session
+
+💬 You: I need to add user authentication to my app
+
+🤖 Assistant: I'd be happy to help you add user authentication! Let me ask a few questions...
+
+💬 You: I want JWT-based auth with login and register endpoints
+
+🤖 Assistant: Great choice! Let me clarify a few things...
+```
+
 ## Environment Variables
 
 The CLI supports multiple ways to configure environment variables:
@@ -528,21 +777,37 @@ export GITHUB_TOKEN=your_token
 
 ```
 src/
-├── main.js              # CLI entry point
+├── main.ts              # CLI entry point
 ├── config/
-│   └── env.js           # Environment & API key management
+│   ├── env.ts           # Environment & API key management
+│   ├── providers.ts     # Provider definitions
+│   ├── custom-models.ts # Custom model management
+│   └── skills.ts        # Skills configuration
 ├── services/
-│   └── ai.service.js    # Vercel AI SDK integration
+│   ├── ai.service.ts    # Vercel AI SDK integration
+│   ├── session-manager.ts # Session persistence
+│   ├── context-manager.ts # Context management
+│   └── planning/        # Spec-driven development
+│       ├── spec-storage.ts
+│       ├── verification.ts
+│       └── export.ts
 ├── tools/
-│   ├── index.js         # Tool exports
-│   ├── web-search.tool.js   # Exa search tools
-│   ├── github.tool.js   # GitHub/PR tools
-│   └── code.tool.js     # File/command tools
+│   ├── index.ts         # Tool exports
+│   ├── web-search.tool.ts   # Exa search tools
+│   ├── github.tool.ts   # GitHub/PR tools
+│   └── code.tool.ts     # File/command tools
 ├── commands/
-│   ├── chat.command.js  # Chat commands
-│   └── config.command.js # Config commands
+│   ├── chat.command.ts  # Chat commands
+│   ├── config.command.ts # Config commands
+│   ├── plan.command.ts  # Plan commands
+│   ├── model.command.ts # Model commands
+│   ├── skills.command.ts # Skills commands
+│   └── preferences.command.ts # Preferences commands
 └── agent/
-    └── agent.js         # Agentic chat loop
+    ├── agent.ts         # Agentic chat loop
+    ├── plan-executor.ts # Plan execution
+    ├── prompts.ts       # System prompts
+    └── display.ts       # Output formatting
 ```
 
 ## Tech Stack
@@ -616,4 +881,3 @@ If automatic package installation fails:
 ## License
 
 MIT
-
