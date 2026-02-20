@@ -7,6 +7,8 @@ import { diffAudit } from "../services/planning/diff-audit.js";
 import { verification } from "../services/planning/verification.js";
 import { exportService } from "../services/planning/export.js";
 import * as ui from "../utils/ui.ts";
+import { aiService } from "../services/ai.service.ts";
+import { generateText } from "ai";
 
 async function createSpecInteractive(): Promise<Partial<SpecItem> | null> {
   intro(chalk.bold.cyan("📋 Create New Plan"));
@@ -64,6 +66,224 @@ async function createSpecInteractive(): Promise<Partial<SpecItem> | null> {
     acceptanceCriteria: criteriaStr ? (criteriaStr as string).split(",").map((s) => s.trim()).filter(Boolean) : [],
     fileBoundaries: boundariesStr ? (boundariesStr as string).split(",").map((s) => s.trim()).filter(Boolean) : [],
   };
+}
+
+export async function createSpecFromAI(prompt: string): Promise<Partial<SpecItem> | null> {
+  intro(chalk.bold.cyan("🤖 AI Plan Creator"));
+
+  console.log(chalk.gray(`\nAnalyzing: "${prompt}"\n`));
+
+  const aiPrompt = `You are a spec creation assistant. Given a user's request, create a detailed implementation plan.
+
+User's request: "${prompt}"
+
+Respond with a JSON object containing:
+{
+  "title": "A short, clear title for the plan",
+  "goal": "A detailed description of what needs to be built",
+  "inScope": ["item 1", "item 2", ...],
+  "outOfScope": ["item to exclude 1", ...] (can be empty),
+  "acceptanceCriteria": ["criterion 1", "criterion 2", ...],
+  "fileBoundaries": ["src/auth", "src/models", ...] (directories/files to focus on)
+}
+
+Be specific and practical. Focus on what's actually needed.
+Respond ONLY with valid JSON, no other text.`;
+
+  try {
+    await aiService.initialize();
+    
+    const result = await aiService.generateText([
+      { role: "user", content: aiPrompt }
+    ]);
+
+    const jsonMatch = result.text.match(/\{[\s\S]*\}/);
+    if (!jsonMatch) {
+      throw new Error("Could not parse AI response");
+    }
+
+    const specData = JSON.parse(jsonMatch[0]);
+    
+    console.log(chalk.green("\n✅ AI generated plan:\n"));
+    console.log(chalk.bold(specData.title));
+    console.log(chalk.gray(`Goal: ${specData.goal}\n`));
+    console.log(chalk.cyan("In Scope:"));
+    specData.inScope?.forEach((item: string) => console.log(chalk.green(`  + ${item}`)));
+    if (specData.outOfScope?.length > 0) {
+      console.log(chalk.red("\nOut of Scope:"));
+      specData.outOfScope.forEach((item: string) => console.log(chalk.red(`  - ${item}`)));
+    }
+    console.log(chalk.cyan("\nAcceptance Criteria:"));
+    specData.acceptanceCriteria?.forEach((item: string, i: number) => console.log(chalk.gray(`  ${i + 1}. ${item}`)));
+
+    const confirmCreate = await confirm({
+      message: "Create this plan?",
+      initialValue: true,
+    });
+
+    if (!confirmCreate) {
+      outro(chalk.yellow("Plan creation cancelled"));
+      return null;
+    }
+
+    return specData;
+  } catch (error) {
+    const errMsg = error instanceof Error ? error.message : String(error);
+    ui.error(`Failed to create plan: ${errMsg}`);
+    return null;
+  }
+}
+
+export async function createInteractivePlan(userRequest: string): Promise<{ spec: SpecItem; askToExecute: boolean } | null> {
+  intro(chalk.bold.cyan("🎯 Collaborative Planning Session"));
+  
+  console.log(chalk.gray(`\nTopic: ${userRequest}\n`));
+  
+  try {
+    await aiService.initialize();
+    
+    const clarifyingPrompt = `The user wants to build: "${userRequest}"
+
+Ask 3-5 clarifying questions to understand what they need. Questions should cover:
+- What type of application/feature is this?
+- What technologies/frameworks are they using?
+- Any specific requirements or constraints?
+- What's their timeline or priority?
+
+Respond with questions only, in a friendly conversational tone.`;
+
+    console.log(chalk.cyan("🤔 Let me ask a few questions to understand better...\n"));
+    
+    const questionsResult = await aiService.generateText([
+      { role: "user", content: clarifyingPrompt }
+    ]);
+    
+    console.log(chalk.white(questionsResult.text));
+    
+    console.log(chalk.gray("\n[In chat mode, the AI will wait for your answers and continue the conversation]\n"));
+    
+    const approachPrompt = `Based on a conversation where the user wants to build: "${userRequest}"
+
+Generate 2-3 different approaches they could take. For each approach include:
+- A name/description
+- Pros and cons
+- Potential issues or risks (be honest!)
+- Complexity level (Simple/Medium/Complex)
+
+Also VERY IMPORTANT:
+- Identify any issues with each approach and explain WHY it's problematic
+- Suggest what you think is the best approach and explain your reasoning
+- If the user's preferred approach has issues, flag them clearly
+
+Respond as a JSON array:
+[
+  {
+    "name": "Approach Name",
+    "description": "What this approach entails",
+    "pros": ["pro 1", "pro 2"],
+    "cons": ["con 1", "but has X issue"],
+    "issues": ["specific issue this could cause"],
+    "complexity": "Simple|Medium|Complex",
+    "recommended": true|false,
+    "userSuggested": true|false
+  }
+]`;
+
+    const approachesResult = await aiService.generateText([
+      { role: "user", content: approachPrompt }
+    ]);
+    
+    const jsonMatch = approachesResult.text.match(/\[[\s\S]*\]/);
+    if (!jsonMatch) {
+      ui.error("Could not generate approaches");
+      return null;
+    }
+
+    const approaches = JSON.parse(jsonMatch[0]);
+    
+    console.log(chalk.cyan("\n📋 Here are some approaches:\n"));
+    
+    approaches.forEach((app: any, i: number) => {
+      const rec = app.recommended ? chalk.green(" ★ Recommended") : "";
+      const userSugg = app.userSuggested ? chalk.yellow(" (your suggestion)") : "";
+      console.log(chalk.white(`${i + 1}. ${app.name}${rec}${userSugg}`));
+      console.log(chalk.gray(`   ${app.description}`));
+      console.log(chalk.gray(`   Complexity: ${app.complexity}`));
+      
+      if (app.pros.length > 0) {
+        console.log(chalk.green(`   ✓ ${app.pros.join(", ")}`));
+      }
+      if (app.cons.length > 0 || app.issues?.length > 0) {
+        console.log(chalk.red(`   ✗ ${[...app.cons, ...(app.issues || [])].join(", ")}`));
+      }
+      console.log("");
+    });
+    
+    const hasIssues = approaches.some((a: any) => a.issues && a.issues.length > 0);
+    if (hasIssues) {
+      console.log(chalk.yellow("⚠️  Some approaches have potential issues. Review carefully before deciding.\n"));
+    }
+    
+    const specPrompt = `Create a detailed implementation plan for: "${userRequest}"
+
+Based on the conversation, create a comprehensive plan.
+
+Respond with JSON:
+{
+  "title": "Short clear title",
+  "goal": "Detailed goal description",
+  "inScope": ["specific item 1", "specific item 2"],
+  "outOfScope": ["item to explicitly exclude"],
+  "acceptanceCriteria": ["testable criterion 1", "criterion 2"],
+  "fileBoundaries": ["src/...", "package.json"],
+  "phases": [
+    {
+      "title": "Phase 1 name",
+      "tasks": ["task 1", "task 2"]
+    }
+  ]
+}`;
+
+    const specResult = await aiService.generateText([
+      { role: "user", content: specPrompt }
+    ]);
+    
+    const specMatch = specResult.text.match(/\{[\s\S]*\}/);
+    if (!specMatch) {
+      ui.error("Could not create plan spec");
+      return null;
+    }
+    
+    const specData = JSON.parse(specMatch[0]);
+    
+    const spec = specStorage.createSpec(specData);
+    
+    console.log(chalk.green(`\n✅ Created plan: ${spec.title}`));
+    console.log(chalk.gray(`Goal: ${spec.goal}\n`));
+    
+    if (spec.acceptanceCriteria.length > 0) {
+      console.log(chalk.cyan("Acceptance Criteria:"));
+      spec.acceptanceCriteria.forEach((c, i) => {
+        console.log(chalk.gray(`  ${i + 1}. ${c}`));
+      });
+    }
+    
+    if (spec.phases.length > 0) {
+      console.log(chalk.cyan("\nPhases:"));
+      spec.phases.forEach((p, i) => {
+        console.log(chalk.gray(`  ${i + 1}. ${p.title} (${p.tasks.length} tasks)`));
+      });
+    }
+    
+    console.log(chalk.gray(`\nID: ${spec.id}\n`));
+    
+    return { spec, askToExecute: true };
+    
+  } catch (error) {
+    const errMsg = error instanceof Error ? error.message : String(error);
+    ui.error(`Planning failed: ${errMsg}`);
+    return null;
+  }
 }
 
 async function listPlans(): Promise<void> {
@@ -256,13 +476,22 @@ export const planCommand = new Command("plan")
     new Command("create")
       .alias("new")
       .description("Create a new plan (interactive)")
-      .action(async () => {
-        const data = await createSpecInteractive();
+      .option("-a, --ai <prompt>", "Create plan using AI from a prompt")
+      .action(async (options) => {
+        let data: Partial<SpecItem> | null = null;
+        
+        if (options.ai) {
+          data = await createSpecFromAI(options.ai);
+        } else {
+          data = await createSpecInteractive();
+        }
+        
         if (data) {
           const spec = specStorage.createSpec(data);
           ui.success(`✓ Created plan: ${spec.title}`);
           ui.dim(`ID: ${spec.id}`);
           ui.dim(`\nActivate with: agentic plan activate ${spec.id}`);
+          ui.dim(`Or run: agentic plan run ${spec.id}`);
         }
       })
   )
@@ -342,9 +571,32 @@ export const planCommand = new Command("plan")
   .addCommand(
     new Command("run")
       .description("Execute a plan with confirmation before changes")
+      .option("-a, --ai <prompt>", "Create and execute plan from AI prompt")
+      .option("-i, --interactive", "Start interactive planning session")
       .argument("[id]", "Plan ID (uses active plan if not specified)")
-      .action(async (id: string | undefined) => {
+      .action(async (options, id: string | undefined) => {
         const { runAgent } = await import("../agent/agent.js");
+        
+        if (options.interactive) {
+          console.log(chalk.cyan("\n🎯 Starting interactive planning session...\n"));
+          console.log(chalk.gray("Tell me what you want to build. I'll ask questions and we can plan together.\n"));
+          console.log(chalk.gray("When ready, say 'create plan' or 'let's do it' to generate the plan.\n"));
+          return;
+        }
+        
+        if (options.ai) {
+          const specData = await createSpecFromAI(options.ai);
+          if (specData) {
+            const spec = specStorage.createSpec(specData);
+            ui.success(`✓ Created plan: ${spec.title}`);
+            
+            await runAgent({
+              mode: "code",
+              planId: spec.id,
+            });
+            return;
+          }
+        }
         
         let planId = id;
         
@@ -353,6 +605,7 @@ export const planCommand = new Command("plan")
           if (specs.length === 0) {
             ui.warning("No active plan. Specify a plan ID or activate a plan first.");
             ui.dim("Usage: agentic plan run <id>");
+            ui.dim("Or use: agentic plan run --ai '<prompt>'");
             return;
           }
           planId = specs[0].id;

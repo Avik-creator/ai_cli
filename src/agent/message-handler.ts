@@ -3,12 +3,17 @@ import boxen from "boxen";
 import yoctoSpinner from "yocto-spinner";
 import { marked } from "marked";
 import { markedTerminal } from "marked-terminal";
+import { confirm } from "@clack/prompts";
 import type { CoreMessage } from "ai";
 import type { ToolSet } from "../tools/index.ts";
 import { aiService } from "../services/ai.service.ts";
 import { sessionManager } from "../services/session-manager.ts";
+import { specStorage } from "../services/planning/spec-storage.js";
+import { exportService } from "../services/planning/export.js";
 import { displayToolCall, displayToolResult, displaySeparator } from "./display.ts";
 import type { ToolCall, ToolResult } from "./display.ts";
+import fs from "fs";
+import { runPlanExecution } from "./plan-executor.ts";
 
 marked.use(
   markedTerminal({
@@ -112,6 +117,82 @@ export async function processMessage(
       if (sessionId) {
         sessionManager.addSessionMessage(sessionId, "assistant", fullResponse);
       }
+    }
+
+    const planPromptFile = ".agentic-plan-prompt.txt";
+    const planReadyFile = ".agentic-plan-ready.txt";
+    try {
+      if (fs.existsSync(planPromptFile)) {
+        const userRequest = fs.readFileSync(planPromptFile, "utf-8").trim();
+        fs.unlinkSync(planPromptFile);
+        
+        console.log(chalk.cyan("\n🤖 Creating plan and implementing...\n"));
+        
+        const { createSpecFromAI } = await import("../commands/plan.command.js");
+        const specData = await createSpecFromAI(userRequest);
+        
+        if (specData) {
+          const spec = specStorage.createSpec(specData);
+          console.log(chalk.green(`\n✓ Created plan: ${spec.title}\n`));
+          
+          console.log(chalk.cyan("📝 Generating tickets...\n"));
+          try {
+            exportService.exportTickets(spec.id, "tasks", undefined);
+            console.log(chalk.green("✓ Tickets generated\n"));
+          } catch (e) {
+            console.log(chalk.yellow("⚠️  Could not generate tickets\n"));
+          }
+          
+          const execute = await confirm({
+            message: "Execute this plan? (Will make changes to your codebase)",
+            initialValue: true,
+          });
+          
+          if (execute) {
+            await runPlanExecution(spec.id);
+          } else {
+            console.log(chalk.yellow("\nPlan saved. Run 'agentic plan run' later to execute.\n"));
+          }
+        }
+        
+        messages.length = 0;
+      }
+      else if (fs.existsSync(planReadyFile)) {
+        const agreedApproach = fs.readFileSync(planReadyFile, "utf-8").trim();
+        fs.unlinkSync(planReadyFile);
+        
+        console.log(chalk.cyan("\n🤖 Creating plan from our discussion...\n"));
+        
+        const { createSpecFromAI } = await import("../commands/plan.command.js");
+        const specData = await createSpecFromAI(agreedApproach);
+        
+        if (specData) {
+          const spec = specStorage.createSpec(specData);
+          console.log(chalk.green(`\n✓ Created plan: ${spec.title}\n`));
+          
+          console.log(chalk.cyan("📝 Generating tickets...\n"));
+          try {
+            exportService.exportTickets(spec.id, "tasks", undefined);
+            console.log(chalk.green("✓ Tickets generated\n"));
+          } catch (e) {
+            console.log(chalk.yellow("⚠️  Could not generate tickets\n"));
+          }
+          
+          const execute = await confirm({
+            message: "Execute this plan? (Will make changes to your codebase)",
+            initialValue: true,
+          });
+          
+          if (execute) {
+            await runPlanExecution(spec.id);
+          } else {
+            console.log(chalk.yellow("\nPlan saved. Run 'agentic plan run' later to execute.\n"));
+          }
+        }
+        
+        messages.length = 0;
+      }
+    } catch (e) {
     }
 
     console.log("");

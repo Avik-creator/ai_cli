@@ -1,0 +1,17 @@
+{
+  "id": "54af370c",
+  "title": "Creating a User Authentication System with SSO",
+  "description": "",
+  "status": "active",
+  "goal": "Having Proper and Smooth Auth System",
+  "inScope": [
+    "login endpoint",
+    "register endpoint"
+  ],
+  "outOfScope": [],
+  "acceptanceCriteria": [],
+  "fileBoundaries": [],
+  "phases": [],
+  "createdAt": "2026-02-20T17:52:24.549Z",
+  "updatedAt": "2026-02-20T17:52:36.850Z"
+}
