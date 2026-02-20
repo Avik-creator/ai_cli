@@ -12,9 +12,11 @@ import {
   generateCommand,
   runCommand,
   fixCommand,
+  sessionsCommand,
 } from "./commands/chat.command.js";
 import { configCommand } from "./commands/config.command.js";
 import { modelCommand } from "./commands/model.command.js";
+import { preferencesCommand } from "./commands/preferences.command.js";
 import { runAgent } from "./agent/agent.js";
 
 dotenv.config();
@@ -58,13 +60,21 @@ async function main(): Promise<void> {
   program.addCommand(generateCommand);
   program.addCommand(runCommand);
   program.addCommand(fixCommand);
+  program.addCommand(sessionsCommand);
   program.addCommand(configCommand);
   program.addCommand(modelCommand);
+  program.addCommand(preferencesCommand);
 
   // Default action - start interactive chat
-  program.action(async () => {
-    await runAgent({ mode: "all" });
+  program.action(async (options) => {
+    await runAgent({ 
+      mode: "all",
+      sessionId: options.session || null 
+    });
   });
+
+  // Add global option for session
+  program.option("-s, --session <session-id>", "Continue an existing session");
 
   await program.parseAsync();
 }

@@ -1,10 +1,12 @@
 import { Command } from "commander";
 import chalk from "chalk";
 import { runAgent } from "../agent/agent.ts";
+import { sessionManager } from "../services/session-manager.ts";
 
 interface RunAgentOptions {
   mode?: string;
   singlePrompt?: string;
+  sessionId?: string | null;
 }
 
 /**
@@ -13,8 +15,37 @@ interface RunAgentOptions {
 export const chatCommand = new Command("chat")
   .description("Start an interactive AI agent chat session")
   .option("-m, --mode <mode>", "Tool mode: all, search, code, pr-review", "all")
-  .action(async (options: { mode: string }) => {
-    await runAgent({ mode: options.mode });
+  .option("-s, --session <session-id>", "Continue an existing session")
+  .action(async (options: { mode: string; session?: string }) => {
+    await runAgent({ 
+      mode: options.mode,
+      sessionId: options.session || null 
+    });
+  });
+
+/**
+ * Sessions command - list and manage sessions
+ */
+export const sessionsCommand = new Command("sessions")
+  .description("List and manage chat sessions")
+  .option("-l, --list", "List all sessions")
+  .option("-d, --delete <session-id>", "Delete a session")
+  .action(async (options: { list?: boolean; delete?: string }) => {
+    if (options.delete) {
+      sessionManager.deleteSession(options.delete);
+      console.log(chalk.green(`Deleted session: ${options.delete.slice(0, 8)}...`));
+      return;
+    }
+    
+    if (options.list) {
+      const sessions = sessionManager.listSessions();
+      console.log(chalk.bold.cyan("\n📋 Chat Sessions:\n"));
+      console.log(sessionManager.formatSessionList(sessions));
+      console.log(chalk.gray(`\nTotal: ${sessions.length} sessions\n`));
+      return;
+    }
+    
+    console.log(chalk.yellow("Use --list to show sessions or --delete <id> to delete a session"));
   });
 
 /**

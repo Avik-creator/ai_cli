@@ -8,6 +8,7 @@ import { aiService } from "../services/ai.service.ts";
 import { allTools, getToolsForTask, toolDescriptions } from "../tools/index.ts";
 import { config, getCurrentProvider } from "../config/env.ts";
 import { PROVIDERS } from "../config/providers.ts";
+import { sessionManager } from "../services/session-manager.ts";
 import type { CoreMessage } from "ai";
 import type { ToolSet } from "../tools/index.ts";
 
@@ -29,9 +30,12 @@ marked.use(
 );
 
 /**
- * System prompt for the agentic assistant
+ * Build system prompt with personality
  */
-const SYSTEM_PROMPT = `You are agentic, an intelligent CLI assistant with access to powerful tools for development tasks.
+function buildSystemPrompt(): string {
+  const personalityAddition = sessionManager.getPersonalityPromptAddition();
+  
+  const basePrompt = `You are agentic, an intelligent CLI assistant with access to powerful tools for development tasks.
 
 ## Your Capabilities:
 1. **Web Search** - Search the internet for documentation, code examples, solutions, and current information using Exa AI
@@ -67,9 +71,16 @@ const SYSTEM_PROMPT = `You are agentic, an intelligent CLI assistant with access
 Current working directory: ${process.cwd()}
 `;
 
+  if (personalityAddition) {
+    return basePrompt + "\n\n" + personalityAddition;
+  }
+  return basePrompt;
+}
+
 interface RunAgentOptions {
   mode?: string;
   singlePrompt?: string | null;
+  sessionId?: string | null;
 }
 
 interface ToolCall {
@@ -200,19 +211,54 @@ export async function runAgent(options: RunAgentOptions = {}): Promise<void> {
     );
   }
 
-  // Conversation history
-  const messages: CoreMessage[] = [
-    {
-      role: "system",
-      content: SYSTEM_PROMPT,
-    },
-  ];
+  // Session management
+  let currentSession = options.sessionId 
+    ? sessionManager.getSession(options.sessionId)
+    : null;
+  
+  let currentSessionId = options.sessionId || (currentSession?.id || null);
 
-  // Single prompt mode
+  // If sessionId provided but not found, create new session
+  if (options.sessionId && !currentSession) {
+    currentSession = sessionManager.createNewSession(mode);
+    currentSessionId = currentSession.id;
+  }
+
+  // Build messages - either from session or fresh
+  let messages: CoreMessage[];
+  
+  if (currentSessionId) {
+    // Load existing session messages
+    messages = sessionManager.loadSessionAsMessages(currentSessionId);
+    if (messages.length === 0) {
+      messages = [{
+        role: "system",
+        content: buildSystemPrompt(),
+      }];
+    }
+  } else {
+    // Fresh session with system prompt
+    messages = [{
+      role: "system",
+      content: buildSystemPrompt(),
+    }];
+  }
+
+  // Single prompt mode - no persistence for one-off commands
   if (singlePrompt) {
-    await processMessage(singlePrompt, messages, tools);
+    await processMessage(singlePrompt, messages, tools, null);
     return;
   }
+
+  // Create session if not exists (for interactive mode)
+  if (!currentSessionId) {
+    currentSession = sessionManager.createNewSession(mode);
+    currentSessionId = currentSession.id;
+  }
+
+  // Show session info
+  const personality = sessionManager.getActivePersonality();
+  console.log(chalk.gray(`Session: ${currentSessionId?.slice(0, 8)}... | Personality: ${personality}`));
 
   // Interactive loop
   while (true) {
@@ -227,7 +273,12 @@ export async function runAgent(options: RunAgentOptions = {}): Promise<void> {
     });
 
     if (isCancel(userInput)) {
-      console.log(chalk.yellow("\n👋 Goodbye!\n"));
+      if (currentSessionId) {
+        console.log(chalk.yellow("\n👋 Goodbye!") + chalk.gray("\n\nTo continue this session later, run:\n"));
+        console.log(chalk.cyan(`  agentic -s ${currentSessionId}\n`));
+      } else {
+        console.log(chalk.yellow("\n👋 Goodbye!\n"));
+      }
       process.exit(0);
     }
 
@@ -235,7 +286,12 @@ export async function runAgent(options: RunAgentOptions = {}): Promise<void> {
 
     // Handle special commands
     if (input.toLowerCase() === "exit" || input.toLowerCase() === "quit") {
-      console.log(chalk.yellow("\n👋 Goodbye!\n"));
+      if (currentSessionId) {
+        console.log(chalk.yellow("\n👋 Goodbye!") + chalk.gray("\n\nTo continue this session later, run:\n"));
+        console.log(chalk.cyan(`  agentic -s ${currentSessionId}\n`));
+      } else {
+        console.log(chalk.yellow("\n👋 Goodbye!\n"));
+      }
       break;
     }
 
@@ -255,7 +311,7 @@ export async function runAgent(options: RunAgentOptions = {}): Promise<void> {
       continue;
     }
 
-    await processMessage(input, messages, tools);
+    await processMessage(input, messages, tools, currentSessionId);
   }
 }
 
@@ -265,13 +321,19 @@ export async function runAgent(options: RunAgentOptions = {}): Promise<void> {
 async function processMessage(
   input: string,
   messages: CoreMessage[],
-  tools: ToolSet
+  tools: ToolSet,
+  sessionId: string | null
 ): Promise<void> {
   // Add user message
   messages.push({
     role: "user",
     content: input,
   });
+
+  // Save user message to session if we have a session
+  if (sessionId) {
+    sessionManager.addSessionMessage(sessionId, "user", input);
+  }
 
   // Display user message
   console.log(
@@ -338,6 +400,11 @@ async function processMessage(
         role: "assistant",
         content: fullResponse,
       });
+      
+      // Save assistant message to session
+      if (sessionId) {
+        sessionManager.addSessionMessage(sessionId, "assistant", fullResponse);
+      }
     }
 
     console.log("");
