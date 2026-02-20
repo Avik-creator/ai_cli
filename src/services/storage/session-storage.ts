@@ -25,6 +25,19 @@ export interface SessionMessage {
   role: "system" | "user" | "assistant";
   content: string;
   createdAt?: string;
+  isSummary?: boolean;
+  compactedAt?: string;
+}
+
+/**
+ * Session summary structure
+ */
+export interface SessionSummary {
+  id?: number;
+  sessionId: string;
+  content: string;
+  modelUsed: string;
+  createdAt: string;
 }
 
 /**
@@ -54,7 +67,6 @@ class SessionStorage {
    * Initialize database tables
    */
   private initialize(): void {
-    // Create sessions table
     this.db.run(`
       CREATE TABLE IF NOT EXISTS sessions (
         id TEXT PRIMARY KEY,
@@ -66,19 +78,30 @@ class SessionStorage {
       )
     `);
 
-    // Create messages table
     this.db.run(`
       CREATE TABLE IF NOT EXISTS messages (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         session_id TEXT NOT NULL,
-        role TEXT NOT NULL CHECK (role IN ('system', 'user', 'assistant')),
+        role TEXT NOT NULL CHECK (role IN ('system', 'user', 'assistant', 'summary')),
         content TEXT NOT NULL,
+        is_summary INTEGER DEFAULT 0,
+        compacted_at TEXT,
         created_at TEXT NOT NULL DEFAULT (datetime('now')),
         FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
       )
     `);
 
-    // Create indexes for performance
+    this.db.run(`
+      CREATE TABLE IF NOT EXISTS session_summaries (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        session_id TEXT NOT NULL,
+        content TEXT NOT NULL,
+        model_used TEXT NOT NULL,
+        created_at TEXT NOT NULL DEFAULT (datetime('now')),
+        FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
+      )
+    `);
+
     this.db.run(`
       CREATE INDEX IF NOT EXISTS idx_messages_session_id 
       ON messages(session_id)
@@ -269,6 +292,113 @@ class SessionStorage {
       `SELECT COUNT(*) as count FROM sessions`
     ).get();
     return result?.count ?? 0;
+  }
+
+  /**
+   * Save a session summary
+   */
+  saveSummary(sessionId: string, content: string, modelUsed: string): SessionSummary {
+    const now = new Date().toISOString();
+
+    const result = this.db.run(
+      `INSERT INTO session_summaries (session_id, content, model_used, created_at) VALUES (?, ?, ?, ?)`,
+      [sessionId, content, modelUsed, now]
+    );
+
+    return {
+      id: Number(result.lastInsertRowid),
+      sessionId,
+      content,
+      modelUsed,
+      createdAt: now,
+    };
+  }
+
+  /**
+   * Get the latest summary for a session
+   */
+  getLatestSummary(sessionId: string): SessionSummary | null {
+    const result = this.db.query<{
+      id: number;
+      session_id: string;
+      content: string;
+      model_used: string;
+      created_at: string;
+    }, [string]>(
+      `SELECT * FROM session_summaries WHERE session_id = ? ORDER BY created_at DESC LIMIT 1`
+    ).get(sessionId);
+
+    if (!result) return null;
+
+    return {
+      id: result.id,
+      sessionId: result.session_id,
+      content: result.content,
+      modelUsed: result.model_used,
+      createdAt: result.created_at,
+    };
+  }
+
+  /**
+   * Get all summaries for a session
+   */
+  getSummaries(sessionId: string): SessionSummary[] {
+    const results = this.db.query<{
+      id: number;
+      session_id: string;
+      content: string;
+      model_used: string;
+      created_at: string;
+    }, [string]>(
+      `SELECT * FROM session_summaries WHERE session_id = ? ORDER BY created_at DESC`
+    ).all(sessionId);
+
+    return results.map((r) => ({
+      id: r.id,
+      sessionId: r.session_id,
+      content: r.content,
+      modelUsed: r.model_used,
+      createdAt: r.created_at,
+    }));
+  }
+
+  /**
+   * Delete old messages before a certain point (for compaction)
+   */
+  compactMessages(sessionId: string, keepAfterId: number): void {
+    const now = new Date().toISOString();
+    this.db.run(
+      `UPDATE messages SET is_summary = 1, compacted_at = ? 
+       WHERE session_id = ? AND id <= ? AND is_summary = 0`,
+      [now, sessionId, keepAfterId]
+    );
+  }
+
+  /**
+   * Get active (non-compacted) messages
+   */
+  getActiveMessages(sessionId: string): SessionMessage[] {
+    const results = this.db.query<{
+      id: number;
+      session_id: string;
+      role: "system" | "user" | "assistant" | "summary";
+      content: string;
+      is_summary: number;
+      compacted_at: string | null;
+      created_at: string;
+    }, [string]>(
+      `SELECT * FROM messages WHERE session_id = ? AND (is_summary = 0 OR is_summary IS NULL) ORDER BY created_at ASC`
+    ).all(sessionId);
+
+    return results.map((r) => ({
+      id: r.id,
+      sessionId: r.session_id,
+      role: r.role === "summary" ? "assistant" : r.role,
+      content: r.content,
+      isSummary: r.is_summary === 1,
+      compactedAt: r.compacted_at || undefined,
+      createdAt: r.created_at,
+    }));
   }
 
   /**

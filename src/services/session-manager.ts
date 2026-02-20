@@ -1,5 +1,6 @@
-import { sessionStorage, type ChatSession, type SessionMessage } from "./storage/session-storage.js";
+import { sessionStorage, type ChatSession, type SessionMessage, type SessionSummary } from "./storage/session-storage.js";
 import { userPreferences, PERSONALITIES, type PersonalityId } from "./storage/user-preferences.js";
+import { contextManager } from "./context-manager.js";
 import { randomUUID } from "crypto";
 import type { CoreMessage } from "ai";
 
@@ -65,6 +66,40 @@ class SessionManager {
       role: m.role,
       content: m.content,
     } as CoreMessage));
+  }
+
+  loadSessionWithSummary(sessionId: string, currentModel: string): CoreMessage[] {
+    const activeMessages = sessionStorage.getActiveMessages(sessionId);
+    const latestSummary = sessionStorage.getLatestSummary(sessionId);
+    
+    const messages: CoreMessage[] = [];
+    
+    if (latestSummary) {
+      const contextPrompt = contextManager.buildContextPrompt(latestSummary.content);
+      messages.push({
+        role: "system",
+        content: contextPrompt,
+      });
+    }
+    
+    for (const msg of activeMessages) {
+      if (msg.role !== "system") {
+        messages.push({
+          role: msg.role,
+          content: msg.content,
+        });
+      }
+    }
+    
+    return messages;
+  }
+
+  async summarizeForModelSwitch(sessionId: string, currentModel: string): Promise<string | null> {
+    return await contextManager.summarizeAndCompact(sessionId, currentModel);
+  }
+
+  getLatestSummary(sessionId: string): SessionSummary | null {
+    return sessionStorage.getLatestSummary(sessionId);
   }
 
   clearSession(sessionId: string): void {

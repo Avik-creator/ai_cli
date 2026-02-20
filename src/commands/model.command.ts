@@ -1,10 +1,12 @@
 import { Command } from "commander";
 import chalk from "chalk";
 import boxen from "boxen";
-import { select, isCancel, intro, outro, confirm } from "@clack/prompts";
+import { select, isCancel, intro, outro, confirm, text } from "@clack/prompts";
 import { AVAILABLE_MODELS, getModelsByProvider, config, getCurrentProvider, storeModel } from "../config/env.ts";
 import { PROVIDERS, PROVIDER_MODELS, type Model } from "../config/providers.ts";
 import { aiService } from "../services/ai.service.ts";
+import { sessionManager } from "../services/session-manager.ts";
+import { runAgent } from "../agent/agent.ts";
 
 /**
  * List all available models
@@ -265,6 +267,110 @@ async function currentAction(): Promise<void> {
 }
 
 /**
+ * Switch model with context summarization
+ */
+async function switchAction(modelId: string | undefined): Promise<void> {
+  const currentModelId = config.getModel();
+  
+  if (!modelId) {
+    intro(chalk.bold.cyan("🔄 Model Switch"));
+    
+    const currentProviderId = await getCurrentProvider();
+    const provider = PROVIDERS[currentProviderId];
+    const currentModel = AVAILABLE_MODELS.find((m) => m.id === currentModelId);
+    
+    console.log(chalk.gray(`Current model: ${chalk.white(currentModelId)}`));
+    console.log(chalk.gray(`Provider: ${chalk.white(provider.name)}\n`));
+    
+    const hasSession = sessionManager.getSessionCount() > 0;
+    
+    if (hasSession) {
+      const continueWithSummary = await confirm({
+        message: "Continue existing session with context summary?",
+        initialValue: true,
+      });
+      
+      if (isCancel(continueWithSummary)) {
+        outro(chalk.yellow("Model switch cancelled"));
+        return;
+      }
+      
+      if (!continueWithSummary) {
+        outro(chalk.yellow("Model switch cancelled - use 'agentic model set' for new session"));
+        return;
+      }
+      
+      const sessionId = await text({
+        message: "Enter session ID to continue (or press Enter for new session):",
+        placeholder: "Leave empty for new session",
+      });
+      
+      if (isCancel(sessionId)) {
+        outro(chalk.yellow("Model switch cancelled"));
+        return;
+      }
+      
+      const sessionIdStr = (sessionId as string).trim();
+      
+      if (sessionIdStr) {
+        const session = sessionManager.getSession(sessionIdStr);
+        if (!session) {
+          console.log(chalk.red("Session not found"));
+          return;
+        }
+        
+        const targetModelId = await select({
+          message: "Select new model:",
+          options: AVAILABLE_MODELS.slice(0, 20).map((m) => ({
+            value: m.id,
+            label: `${chalk.white(m.name)} ${chalk.gray(`[${m.provider}]`)}`,
+            hint: m.id === currentModelId ? "current" : undefined,
+          })),
+        });
+        
+        if (isCancel(targetModelId)) {
+          outro(chalk.yellow("Model switch cancelled"));
+          return;
+        }
+        
+        await config.setModel(targetModelId as string);
+        
+        console.log(chalk.green(`\n✓ Switching to model: ${targetModelId}`));
+        console.log(chalk.yellow("Generating context summary...\n"));
+        
+        await runAgent({
+          mode: session.mode,
+          sessionId: sessionIdStr,
+          switchModel: true,
+          modelId: targetModelId as string,
+        });
+        return;
+      }
+    }
+    
+    const targetModelId = await select({
+      message: "Select new model:",
+      options: AVAILABLE_MODELS.slice(0, 20).map((m) => ({
+        value: m.id,
+        label: `${chalk.white(m.name)} ${chalk.gray(`[${m.provider}]`)}`,
+        hint: m.id === currentModelId ? "current" : undefined,
+      })),
+    });
+    
+    if (isCancel(targetModelId)) {
+      outro(chalk.yellow("Model switch cancelled"));
+      return;
+    }
+    
+    modelId = targetModelId as string;
+  }
+  
+  await config.setModel(modelId);
+  
+  console.log(chalk.green(`\n✓ Model switched to: ${modelId}\n`));
+}
+
+/**
  * Model command
  */
 export const modelCommand = new Command("model")
@@ -279,6 +385,13 @@ export const modelCommand = new Command("model")
       .description("Set the AI model to use")
       .argument("[model-id]", "Model ID (e.g., openai/gpt-5-mini)")
       .action(setAction)
+  )
+  .addCommand(
+    new Command("switch")
+      .alias("sw")
+      .description("Switch to a new model with context summary for continuing sessions")
+      .argument("[model-id]", "Model ID to switch to")
+      .action(switchAction)
   )
   .addCommand(
     new Command("current")

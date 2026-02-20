@@ -81,6 +81,8 @@ interface RunAgentOptions {
   mode?: string;
   singlePrompt?: string | null;
   sessionId?: string | null;
+  switchModel?: boolean;
+  modelId?: string;
 }
 
 interface ToolCall {
@@ -226,11 +228,15 @@ export async function runAgent(options: RunAgentOptions = {}): Promise<void> {
 
   // Build messages - either from session or fresh
   let messages: CoreMessage[];
+  const currentModel = aiService.getModelId();
   
   if (currentSessionId) {
-    // Load existing session messages
-    messages = sessionManager.loadSessionAsMessages(currentSessionId);
-    if (messages.length === 0) {
+    if (options.switchModel && options.modelId) {
+      console.log(chalk.yellow("\n🔄 Switching model, generating context summary...\n"));
+      await sessionManager.summarizeForModelSwitch(currentSessionId, currentModel);
+    }
+    messages = sessionManager.loadSessionWithSummary(currentSessionId, currentModel);
+    if (messages.length <= 1) {
       messages = [{
         role: "system",
         content: buildSystemPrompt(),
