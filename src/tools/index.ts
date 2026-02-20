@@ -7,6 +7,9 @@ import {
   executeCommandTool,
   searchFilesTool,
   createProjectTool,
+  findSkillsTool,
+  installSkillTool,
+  listSkillsTool,
 } from "./code.tool.js";
 // Tool type - using a more flexible type that accepts any Tool
 import type { Tool } from "ai";
@@ -26,6 +29,11 @@ export const toolsByCategory: {
     searchFiles: Tool<any, any>;
     createProject: Tool<any, any>;
   };
+  skills: {
+    findSkills: Tool<any, any>;
+    installSkill: Tool<any, any>;
+    listSkills: Tool<any, any>;
+  };
 } = {
   search: {
     webSearch: webSearchTool,
@@ -43,6 +51,11 @@ export const toolsByCategory: {
     executeCommand: executeCommandTool,
     searchFiles: searchFilesTool,
     createProject: createProjectTool,
+  },
+  skills: {
+    findSkills: findSkillsTool,
+    installSkill: installSkillTool,
+    listSkills: listSkillsTool,
   },
 };
 
@@ -66,6 +79,11 @@ export const allTools: ToolSet = {
   executeCommand: executeCommandTool,
   searchFiles: searchFilesTool,
   createProject: createProjectTool,
+
+  // Skills
+  findSkills: findSkillsTool,
+  installSkill: installSkillTool,
+  listSkills: listSkillsTool,
 };
 
 /**
@@ -97,6 +115,8 @@ export function getToolsForTask(taskType: string): ToolSet {
         searchFiles: searchFilesTool,
         createProject: createProjectTool,
         webSearch: webSearchTool,
+        findSkills: findSkillsTool,
+        installSkill: installSkillTool,
       };
 
     case "all":
@@ -135,6 +155,14 @@ export const toolDescriptions = [
       { name: "createProject", description: "Create multiple files at once" },
     ],
   },
+  {
+    category: "Skills",
+    tools: [
+      { name: "findSkills", description: "Search for installable agent skills" },
+      { name: "installSkill", description: "Install an agent skill" },
+      { name: "listSkills", description: "List installed skills" },
+    ],
+  },
 ] as const;
 
 export {
@@ -149,5 +177,7 @@ export {
   executeCommandTool,
   searchFilesTool,
   createProjectTool,
+  findSkillsTool,
+  installSkillTool,
+  listSkillsTool,
 };
-
