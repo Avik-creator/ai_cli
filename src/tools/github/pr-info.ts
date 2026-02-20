@@ -3,6 +3,7 @@ import { z } from "zod";
 import { getApiKey } from "../../config/env.ts";
 import chalk from "chalk";
 import { simpleGit } from "simple-git";
+import { githubClient } from "../../utils/github-client.ts";
 
 const git = simpleGit();
 
@@ -116,22 +117,7 @@ export const getPRInfoTool = tool({
 
       console.log(chalk.cyan(`\n📋 Fetching PR #${finalPrNumber} from ${finalOwner}/${finalRepo}...`));
 
-      const headers: Record<string, string> = {
-        Authorization: `Bearer ${token}`,
-        Accept: "application/vnd.github.v3+json",
-        "X-GitHub-Api-Version": "2022-11-28",
-      };
-
-      const prResponse = await fetch(
-        `https://api.github.com/repos/${finalOwner}/${finalRepo}/pulls/${finalPrNumber}`,
-        { headers }
-      );
-
-      if (!prResponse.ok) {
-        throw new Error(`GitHub API error: ${prResponse.status}`);
-      }
-
-      const prData = await prResponse.json() as {
+      const prData = await githubClient.getPR(finalOwner, finalRepo, finalPrNumber) as {
         number: number;
         title: string;
         body: string | null;
@@ -148,43 +134,9 @@ export const getPRInfoTool = tool({
         html_url: string;
       };
 
-      const diffResponse = await fetch(
-        `https://api.github.com/repos/${finalOwner}/${finalRepo}/pulls/${finalPrNumber}`,
-        {
-          headers: {
-            ...headers,
-            Accept: "application/vnd.github.v3.diff",
-          },
-        }
-      );
-
-      const diff = await diffResponse.text();
-
-      const filesResponse = await fetch(
-        `https://api.github.com/repos/${finalOwner}/${finalRepo}/pulls/${finalPrNumber}/files`,
-        { headers }
-      );
-
-      const files = await filesResponse.json() as Array<{
-        filename: string;
-        status: string;
-        additions: number;
-        deletions: number;
-        patch?: string;
-      }>;
-
-      const commentsResponse = await fetch(
-        `https://api.github.com/repos/${finalOwner}/${finalRepo}/pulls/${finalPrNumber}/comments`,
-        { headers }
-      );
-
-      const comments = await commentsResponse.json() as Array<{
-        user?: { login: string };
-        body: string;
-        path?: string;
-        line?: number | null;
-        created_at: string;
-      }>;
+      const diff = await githubClient.getPRDiff(finalOwner, finalRepo, finalPrNumber);
+      const files = await githubClient.getPRFiles(finalOwner, finalRepo, finalPrNumber);
+      const comments = await githubClient.getPRComments(finalOwner, finalRepo, finalPrNumber);
 
       console.log(chalk.green(`✅ PR fetched: "${prData.title}"`));
 

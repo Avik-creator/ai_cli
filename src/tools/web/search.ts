@@ -2,6 +2,7 @@ import { tool } from "ai";
 import { z } from "zod";
 import { getApiKey } from "../../config/env.ts";
 import chalk from "chalk";
+import { exaClient } from "../../utils/exa-client.ts";
 
 export interface SearchResult {
   url: string;
@@ -73,51 +74,12 @@ export const webSearchTool = tool({
     try {
       console.log(chalk.cyan(`\n🔍 Searching: "${query}"...`));
 
-      const requestBody: Record<string, unknown> = {
-        query: query.trim(),
+      const data = await exaClient.search({
+        query,
         type,
-        numResults: Math.min(Math.max(1, numResults), 100),
-        contents: {
-          text: { maxCharacters: 2000 },
-          livecrawl: "fallback",
-          summary: true,
-          highlights: {
-            numSentences: 3,
-            highlightsPerUrl: 2,
-          },
-        },
-      };
-
-      if (category) {
-        requestBody.category = category;
-      }
-
-      const response = await fetch("https://api.exa.ai/search", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "x-api-key": apiKey,
-        },
-        body: JSON.stringify(requestBody),
+        numResults,
+        category,
       });
-
-      if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error(`Exa API error: ${response.status} - ${errorText}`);
-      }
-
-      const data = await response.json() as {
-        results?: Array<{
-          url: string;
-          title: string;
-          summary?: string;
-          highlights?: string[];
-          text?: string;
-          publishedDate?: string;
-          author?: string;
-        }>;
-        resolvedSearchType?: string;
-      };
 
       console.log(chalk.green(`✅ Found ${data.results?.length || 0} results`));
 
