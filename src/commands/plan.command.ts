@@ -574,17 +574,17 @@ export const planCommand = new Command("plan")
       .option("-a, --ai <prompt>", "Create and execute plan from AI prompt")
       .option("-i, --interactive", "Start interactive planning session")
       .argument("[id]", "Plan ID (uses active plan if not specified)")
-      .action(async (options, id: string | undefined) => {
+      .action(async (id: string | undefined, options) => {
         const { runAgent } = await import("../agent/agent.js");
         
-        if (options.interactive) {
+        if (options?.interactive) {
           console.log(chalk.cyan("\n🎯 Starting interactive planning session...\n"));
           console.log(chalk.gray("Tell me what you want to build. I'll ask questions and we can plan together.\n"));
           console.log(chalk.gray("When ready, say 'create plan' or 'let's do it' to generate the plan.\n"));
           return;
         }
         
-        if (options.ai) {
+        if (options?.ai) {
           const specData = await createSpecFromAI(options.ai);
           if (specData) {
             const spec = specStorage.createSpec(specData);

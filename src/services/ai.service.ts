@@ -135,11 +135,7 @@ export class AIService {
     }
 
     if (!modelExists && selectedModel) {
-      console.log(
-        chalk.yellow(
-          `⚠️  Warning: Model "${selectedModel}" not found. Using default for ${provider.name}.`
-        )
-      );
+      // Silently use default model - don't warn about unknown models
       // Use first model from provider as default
       if (provider.id === "gateway") {
         this.modelId = config.getModel();
