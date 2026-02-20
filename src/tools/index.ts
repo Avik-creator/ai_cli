@@ -1,8 +1,5 @@
-/**
- * All available tools for the agentic CLI
- */
-import { webSearchTool, getContentsTool } from "./web-search.tool.js";
-import { getPRInfoTool, postPRCommentTool, getGitStatusTool } from "./github.tool.js";
+import { webSearchTool, getContentsTool } from "./web/index.js";
+import { getPRInfoTool, postPRCommentTool, getGitStatusTool } from "./github/index.js";
 import {
   readFileTool,
   writeFileTool,

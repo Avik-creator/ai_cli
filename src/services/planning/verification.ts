@@ -1,141 +1,10 @@
 import chalk from "chalk";
 import boxen from "boxen";
-import { aiService } from "../ai.service.js";
-import type { SpecItem, VerificationIssue, VerificationPriority } from "./spec-storage.js";
+import { specStorage } from "./spec-storage.js";
 import { diffAudit, type DiffFile, type RiskScore } from "./diff-audit.js";
-
-function generateId(): string {
-  return Math.random().toString(36).substring(2, 9);
-}
-
-const VERIFICATION_PROMPT = `You are a spec verification engine. Analyze the code changes against the specification and identify issues.
-
-## Your Task:
-1. Compare the diff against the spec's acceptance criteria
-2. Identify what's implemented vs what's missing
-3. Categorize issues by severity
-
-## Spec:
-- Goal: {goal}
-- In Scope: {inScope}
-- Out of Scope: {outOfScope}
-- Acceptance Criteria: {acceptanceCriteria}
-
-## Changed Files:
-{files}
-
-## Your Output Format:
-Return a JSON array of issues in this exact format:
-[
-  {
-    "priority": "critical|major|minor",
-    "category": "missing_feature|scope_violation|incomplete|incorrect",
-    "description": "Clear description of the issue",
-    "file": "optional file path",
-    "suggestion": "How to fix it"
-  }
-]
-
-Only return the JSON array, nothing else.`;
-
-function formatFilesForPrompt(files: DiffFile[]): string {
-  return files
-    .map(
-      (f) =>
-        `- ${f.path} (${f.status}): +${f.additions} -${f.deletions}`
-    )
-    .join("\n");
-}
-
-async function verifyWithAI(
-  spec: SpecItem,
-  files: DiffFile[]
-): Promise<VerificationIssue[]> {
-  const prompt = VERIFICATION_PROMPT
-    .replace("{goal}", spec.goal)
-    .replace("{inScope}", spec.inScope.join(", "))
-    .replace("{outOfScope}", spec.outOfScope.join(", "))
-    .replace(
-      "{acceptanceCriteria}",
-      spec.acceptanceCriteria.map((c) => `- ${c}`).join("\n")
-    )
-    .replace("{files}", formatFilesForPrompt(files));
-
-  let jsonStr = "";
-
-  await aiService.sendMessage(
-    [
-      {
-        role: "system",
-        content: "You are a strict spec verification engine. Return only valid JSON.",
-      },
-      {
-        role: "user",
-        content: prompt,
-      },
-    ],
-    (chunk) => {
-      jsonStr += chunk;
-    },
-    {},
-    undefined,
-    { maxSteps: 2 }
-  );
-
-  try {
-    const startIdx = jsonStr.indexOf("[");
-    const endIdx = jsonStr.lastIndexOf("]");
-    
-    if (startIdx === -1 || endIdx === -1) {
-      return [];
-    }
-
-    const parsed = JSON.parse(jsonStr.substring(startIdx, endIdx + 1));
-    
-    return parsed.map((p: any) => ({
-      id: generateId(),
-      specId: spec.id,
-      priority: p.priority as VerificationPriority,
-      category: p.category,
-      description: p.description,
-      file: p.file,
-      suggestion: p.suggestion,
-      resolved: false,
-      createdAt: new Date().toISOString(),
-    }));
-  } catch {
-    return [];
-  }
-}
-
-function verifyLocally(spec: SpecItem, files: DiffFile[]): VerificationIssue[] {
-  const issues: VerificationIssue[] = [];
-
-  const changedFilePaths = new Set(files.map((f) => f.path));
-
-  for (const criterion of spec.acceptanceCriteria) {
-    const keywords = criterion.toLowerCase().split(" ").filter((w) => w.length > 3);
-    
-    const hasRelatedFile = files.length === 0 || keywords.some((keyword) =>
-      files.some((f) => f.path.toLowerCase().includes(keyword))
-    );
-
-    if (!hasRelatedFile && spec.inScope.length > 0) {
-      issues.push({
-        id: generateId(),
-        specId: spec.id,
-        priority: "major",
-        category: "missing_feature",
-        description: `Acceptance criterion may not be addressed: ${criterion}`,
-        suggestion: "Verify this criterion is addressed in the changes",
-        resolved: false,
-        createdAt: new Date().toISOString(),
-      });
-    }
-  }
-
-  return issues;
-}
+import { verifyWithAI } from "./ai-verification.js";
+import { verifyLocally } from "./local-verification.js";
+import type { SpecItem, VerificationIssue } from "./spec-storage.js";
 
 export const verification = {
   async verify(specId: string, useAI: boolean = false): Promise<{
@@ -144,7 +13,6 @@ export const verification = {
     risk: RiskScore;
     files: DiffFile[];
   } | null> {
-    const { specStorage } = require("./spec-storage.js");
     const spec = specStorage.getSpec(specId);
     
     if (!spec) {
