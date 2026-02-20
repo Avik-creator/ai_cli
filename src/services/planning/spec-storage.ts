@@ -1,6 +1,7 @@
 import { join } from "path";
 import { mkdirSync, existsSync, readFileSync, writeFileSync, readdirSync, unlinkSync } from "fs";
 import { randomUUID } from "crypto";
+import { exportService } from "./export.js";
 
 const SPEC_DIR = ".agentic-plan";
 
@@ -124,6 +125,8 @@ export const specStorage = {
 
     const filename = join(getSpecDir(), `${id}.json`);
     saveSpec(spec, filename);
+
+    exportService.exportTickets(id, "tasks");
 
     return spec;
   },
