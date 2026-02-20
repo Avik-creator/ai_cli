@@ -124,6 +124,34 @@ class SessionStorage {
     } catch {
       // Column already exists, ignore
     }
+
+    // Planning sessions table
+    this.db.run(`
+      CREATE TABLE IF NOT EXISTS planning_sessions (
+        id TEXT PRIMARY KEY,
+        started_at TEXT NOT NULL DEFAULT (datetime('now')),
+        last_activity TEXT NOT NULL DEFAULT (datetime('now')),
+        agreed_approach TEXT,
+        status TEXT NOT NULL DEFAULT 'active',
+        plan_id TEXT
+      )
+    `);
+
+    this.db.run(`
+      CREATE TABLE IF NOT EXISTS planning_messages (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        planning_session_id TEXT NOT NULL,
+        role TEXT NOT NULL CHECK (role IN ('system', 'user', 'assistant')),
+        content TEXT NOT NULL,
+        created_at TEXT NOT NULL DEFAULT (datetime('now')),
+        FOREIGN KEY (planning_session_id) REFERENCES planning_sessions(id) ON DELETE CASCADE
+      )
+    `);
+
+    this.db.run(`
+      CREATE INDEX IF NOT EXISTS idx_planning_messages_session_id 
+      ON planning_messages(planning_session_id)
+    `);
   }
 
   /**
@@ -419,6 +447,111 @@ class SessionStorage {
    */
   close(): void {
     this.db.close();
+  }
+
+  // ========== Planning Session Methods ==========
+
+  createPlanningSession(id: string): void {
+    const now = new Date().toISOString();
+    this.db.run(
+      `INSERT INTO planning_sessions (id, started_at, last_activity, status) VALUES (?, ?, ?, 'active')`,
+      [id, now, now]
+    );
+  }
+
+  updatePlanningSession(id: string, agreedApproach?: string, planId?: string, status?: string): void {
+    const updates: string[] = [];
+    const params: string[] = [];
+
+    if (agreedApproach !== undefined) {
+      updates.push("agreed_approach = ?");
+      params.push(agreedApproach);
+    }
+    if (planId !== undefined) {
+      updates.push("plan_id = ?");
+      params.push(planId);
+    }
+    if (status !== undefined) {
+      updates.push("status = ?");
+      params.push(status);
+    }
+
+    if (updates.length > 0) {
+      updates.push("last_activity = ?");
+      params.push(new Date().toISOString());
+      params.push(id);
+      this.db.run(`UPDATE planning_sessions SET ${updates.join(", ")} WHERE id = ?`, params);
+    }
+  }
+
+  getPlanningSession(id: string): { id: string; startedAt: string; lastActivity: string; agreedApproach?: string; status: string; planId?: string } | null {
+    const result = this.db.query<{
+      id: string;
+      started_at: string;
+      last_activity: string;
+      agreed_approach: string | null;
+      status: string;
+      plan_id: string | null;
+    }, [string]>(`SELECT * FROM planning_sessions WHERE id = ?`).get(id);
+
+    if (!result) return null;
+    return {
+      id: result.id,
+      startedAt: result.started_at,
+      lastActivity: result.last_activity,
+      agreedApproach: result.agreed_approach || undefined,
+      status: result.status,
+      planId: result.plan_id || undefined,
+    };
+  }
+
+  listPlanningSessions(): { id: string; startedAt: string; lastActivity: string; status: string }[] {
+    const results = this.db.query<{
+      id: string;
+      started_at: string;
+      last_activity: string;
+      status: string;
+    }, []>(`SELECT id, started_at, last_activity, status FROM planning_sessions ORDER BY last_activity DESC`).all();
+
+    return results.map(r => ({
+      id: r.id,
+      startedAt: r.started_at,
+      lastActivity: r.last_activity,
+      status: r.status,
+    }));
+  }
+
+  deletePlanningSession(id: string): void {
+    this.db.run(`DELETE FROM planning_messages WHERE planning_session_id = ?`, [id]);
+    this.db.run(`DELETE FROM planning_sessions WHERE id = ?`, [id]);
+  }
+
+  addPlanningMessage(planningSessionId: string, role: "system" | "user" | "assistant", content: string): void {
+    const now = new Date().toISOString();
+    this.db.run(
+      `INSERT INTO planning_messages (planning_session_id, role, content, created_at) VALUES (?, ?, ?, ?)`,
+      [planningSessionId, role, content, now]
+    );
+    this.db.run(
+      `UPDATE planning_sessions SET last_activity = ? WHERE id = ?`,
+      [now, planningSessionId]
+    );
+  }
+
+  getPlanningMessages(planningSessionId: string): { role: "system" | "user" | "assistant"; content: string; createdAt: string }[] {
+    const results = this.db.query<{
+      role: "system" | "user" | "assistant";
+      content: string;
+      created_at: string;
+    }, [string]>(
+      `SELECT role, content, created_at FROM planning_messages WHERE planning_session_id = ? ORDER BY created_at ASC`
+    ).all(planningSessionId);
+
+    return results.map(r => ({
+      role: r.role,
+      content: r.content,
+      createdAt: r.created_at,
+    }));
   }
 }
 

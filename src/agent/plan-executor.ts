@@ -3,17 +3,17 @@ import boxen from "boxen";
 import yoctoSpinner from "yocto-spinner";
 import { marked } from "marked";
 import { markedTerminal } from "marked-terminal";
-import { confirm, text, isCancel } from "@clack/prompts";
+import { confirm, text, isCancel, select } from "@clack/prompts";
 import { aiService } from "../services/ai.service.ts";
 import { getToolsForTask } from "../tools/index.ts";
 import { specStorage } from "../services/planning/spec-storage.ts";
 import { exportService } from "../services/planning/export.ts";
+import { sessionStorage } from "../services/storage/session-storage.ts";
 import { buildSystemPrompt, formatSpecForPrompt } from "./prompts.ts";
 import { displayToolCall, displaySeparator } from "./display.ts";
 import type { ToolCall } from "./display.ts";
 import type { CoreMessage } from "ai";
 import fs from "fs";
-import path from "path";
 
 marked.use(
   markedTerminal({
@@ -32,46 +32,11 @@ marked.use(
 );
 
 const PLAN_DIR = ".agentic-plan";
-const SESSION_FILE = `${PLAN_DIR}/session.json`;
-
-interface PlanningSession {
-  id: string;
-  startedAt: string;
-  lastActivity: string;
-  messages: CoreMessage[];
-  agreedApproach?: string;
-}
 
 function ensurePlanDir(): void {
   if (!fs.existsSync(PLAN_DIR)) {
     fs.mkdirSync(PLAN_DIR, { recursive: true });
   }
-}
-
-function loadSession(): PlanningSession | null {
-  if (!fs.existsSync(SESSION_FILE)) {
-    return null;
-  }
-  try {
-    const data = fs.readFileSync(SESSION_FILE, "utf-8");
-    return JSON.parse(data);
-  } catch {
-    return null;
-  }
-}
-
-function saveSession(session: PlanningSession): void {
-  ensurePlanDir();
-  fs.writeFileSync(SESSION_FILE, JSON.stringify(session, null, 2), "utf-8");
-}
-
-function createNewSession(): PlanningSession {
-  return {
-    id: Date.now().toString(36),
-    startedAt: new Date().toISOString(),
-    lastActivity: new Date().toISOString(),
-    messages: [],
-  };
 }
 
 async function generateArchitectureDiagram(spec: any): Promise<void> {
@@ -307,22 +272,37 @@ Start implementing now.`;
 export async function runInteractivePlanning(): Promise<void> {
   ensurePlanDir();
 
-  let session = loadSession();
+  const sessions = sessionStorage.listPlanningSessions();
+  let currentSessionId: string | null = null;
   let isNewSession = false;
 
-  if (session) {
-    const resume = await confirm({
-      message: `Found a previous planning session from ${new Date(session.lastActivity).toLocaleString()}. Resume?`,
-      initialValue: true,
+  if (sessions.length > 0) {
+    const options = [
+      { value: "new", label: "Start new planning session" },
+      ...sessions.filter(s => s.status === "active").map(s => ({
+        value: s.id,
+        label: `Resume session from ${new Date(s.lastActivity).toLocaleString()}`,
+      })),
+    ];
+
+    const choice = await select({
+      message: "Planning sessions:",
+      options,
     });
 
-    if (!resume) {
-      session = createNewSession();
+    if (isCancel(choice) || choice === "new") {
+      currentSessionId = null;
       isNewSession = true;
+    } else {
+      currentSessionId = choice as string;
     }
   } else {
-    session = createNewSession();
     isNewSession = true;
+  }
+
+  if (isNewSession) {
+    currentSessionId = Date.now().toString(36);
+    sessionStorage.createPlanningSession(currentSessionId);
   }
 
   if (isNewSession) {
@@ -362,9 +342,10 @@ export async function runInteractivePlanning(): Promise<void> {
   await aiService.initialize();
 
   const systemPrompt = await buildSystemPrompt();
+  const messages: CoreMessage[] = [];
 
-  if (session.messages.length === 0) {
-    session.messages.push({
+  if (isNewSession) {
+    messages.push({
       role: "system",
       content: `${systemPrompt}
 
@@ -374,7 +355,8 @@ Follow the Interactive Planning Session flow from the system prompt.
 Keep your FIRST response SHORT - just a friendly greeting and ask what they want to build.`,
     });
   } else {
-    session.messages.push({
+    const savedMessages = sessionStorage.getPlanningMessages(currentSessionId!);
+    messages.push({
       role: "system",
       content: `${systemPrompt}
 
@@ -382,9 +364,10 @@ Keep your FIRST response SHORT - just a friendly greeting and ask what they want
 You are resuming a previous planning conversation. The user wants to continue from where they left off.
 Keep your response SHORT - acknowledge you're back and ask how they want to proceed.`,
     });
+    for (const msg of savedMessages) {
+      messages.push({ role: msg.role, content: msg.content });
+    }
   }
-
-  saveSession(session);
 
   while (true) {
     const userInput = await text({
@@ -404,15 +387,14 @@ Keep your response SHORT - acknowledge you're back and ask how they want to proc
       break;
     }
 
-    session.messages.push({ role: "user", content: input });
-    session.lastActivity = new Date().toISOString();
-    saveSession(session);
+    messages.push({ role: "user", content: input });
+    sessionStorage.addPlanningMessage(currentSessionId!, "user", input);
 
     let fullResponse = "";
     const spin = yoctoSpinner({ text: "Thinking...", color: "cyan" }).start();
 
     await aiService.sendMessage(
-      session.messages,
+      messages,
       (chunk) => {
         if (fullResponse === "") {
           spin.stop();
@@ -433,9 +415,8 @@ Keep your response SHORT - acknowledge you're back and ask how they want to proc
     if (fullResponse) {
       const rendered = marked.parse(fullResponse);
       console.log(rendered);
-      session.messages.push({ role: "assistant", content: fullResponse });
-      session.lastActivity = new Date().toISOString();
-      saveSession(session);
+      messages.push({ role: "assistant", content: fullResponse });
+      sessionStorage.addPlanningMessage(currentSessionId!, "assistant", fullResponse);
     }
 
     displaySeparator();
@@ -445,6 +426,8 @@ Keep your response SHORT - acknowledge you're back and ask how they want to proc
       const agreedApproach = fs.readFileSync(planReadyFile, "utf-8").trim();
       fs.unlinkSync(planReadyFile);
 
+      sessionStorage.updatePlanningSession(currentSessionId!, agreedApproach);
+
       console.log(chalk.cyan("\n🤖 Creating implementation plan...\n"));
 
       const { createSpecFromAI } = await import("../commands/plan.command.js");
@@ -453,6 +436,8 @@ Keep your response SHORT - acknowledge you're back and ask how they want to proc
       if (specData) {
         const spec = specStorage.createSpec(specData);
         console.log(chalk.green(`\n✅ Created plan: ${spec.title}\n`));
+
+        sessionStorage.updatePlanningSession(currentSessionId!, undefined, spec.id, "completed");
 
         console.log(chalk.cyan("📝 Generating tickets...\n"));
         try {
@@ -488,7 +473,6 @@ Keep your response SHORT - acknowledge you're back and ask how they want to proc
         });
 
         if (execute) {
-          fs.unlinkSync(SESSION_FILE);
           await runPlanExecution(spec.id);
           return;
         } else {
