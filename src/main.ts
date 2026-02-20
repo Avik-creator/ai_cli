@@ -17,6 +17,7 @@ import {
 import { configCommand } from "./commands/config.command.js";
 import { modelCommand } from "./commands/model.command.js";
 import { preferencesCommand } from "./commands/preferences.command.js";
+import { planCommand } from "./commands/plan.command.js";
 import { runAgent } from "./agent/agent.js";
 
 dotenv.config();
@@ -64,6 +65,7 @@ async function main(): Promise<void> {
   program.addCommand(configCommand);
   program.addCommand(modelCommand);
   program.addCommand(preferencesCommand);
+  program.addCommand(planCommand);
 
   // Default action - start interactive chat
   program.action(async (options) => {
