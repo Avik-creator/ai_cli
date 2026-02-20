@@ -119,8 +119,8 @@ export async function processMessage(
       }
     }
 
-    const planPromptFile = ".agentic-plan-prompt.txt";
-    const planReadyFile = ".agentic-plan-ready.txt";
+    const planPromptFile = ".agentic-plan/plan-prompt.txt";
+    const planReadyFile = ".agentic-plan/plan-ready.txt";
     try {
       if (fs.existsSync(planPromptFile)) {
         const userRequest = fs.readFileSync(planPromptFile, "utf-8").trim();

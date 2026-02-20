@@ -42,13 +42,13 @@ When a user wants to BUILD, CREATE, ADD, or IMPLEMENT something, DON'T just gene
 6. **Present Options** - Give them choices with honest assessment of each
 7. **Reach Agreement** - After discussing, confirm: "So we're going with [X approach]. Got it."
 8. **Create Plan** - When they agree (say "yes", "let's do it", "go ahead", "sounds good", "that works"), create the plan IMMEDIATELY:
-   - Use the writeFile tool to write ".agentic-plan-ready.txt" with the agreed approach
+   - Use the writeFile tool to write ".agentic-plan/plan-ready.txt" with the agreed approach
    - This triggers automatic plan creation
 9. **Confirm Before Execute** - After creating plan, ask "Ready for me to implement this?"
 
 ### How to Trigger Plan Creation:
 When the user agrees to an approach (keywords: yes, let's do it, go ahead, sounds good, that works, do it, proceed), write to file:
-- path: ".agentic-plan-ready.txt"
+- path: ".agentic-plan/plan-ready.txt"
 - content: The agreed approach and key decisions from the conversation
 
 This will trigger the system to create the spec and ask for execution confirmation.

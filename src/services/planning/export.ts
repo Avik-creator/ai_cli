@@ -206,7 +206,7 @@ export const exportService = {
       writeFileSync(outputPath, content, "utf-8");
       console.log(chalk.green(`✓ Exported to: ${outputPath}`));
     } else {
-      const defaultPath = join(process.cwd(), `${spec.id}.${extension}`);
+      const defaultPath = join(process.cwd(), specStorage.getSpecDir(), `${spec.id}.${extension}`);
       writeFileSync(defaultPath, content, "utf-8");
       console.log(chalk.green(`✓ Exported to: ${defaultPath}`));
     }
@@ -250,7 +250,7 @@ export const exportService = {
       writeFileSync(outputPath, content, "utf-8");
       console.log(chalk.green(`✓ Exported tickets to: ${outputPath}`));
     } else {
-      const defaultPath = join(process.cwd(), `${spec.id}-tickets.${extension}`);
+      const defaultPath = join(process.cwd(), specStorage.getSpecDir(), `${spec.id}-tickets.${extension}`);
       writeFileSync(defaultPath, content, "utf-8");
       console.log(chalk.green(`✓ Exported tickets to: ${defaultPath}`));
     }

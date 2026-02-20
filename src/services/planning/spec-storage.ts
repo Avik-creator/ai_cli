@@ -2,7 +2,7 @@ import { join } from "path";
 import { mkdirSync, existsSync, readFileSync, writeFileSync, readdirSync, unlinkSync } from "fs";
 import { randomUUID } from "crypto";
 
-const SPEC_DIR = ".agentic-specs";
+const SPEC_DIR = ".agentic-plan";
 
 function getSpecDir(): string {
   const specDir = join(process.cwd(), SPEC_DIR);
