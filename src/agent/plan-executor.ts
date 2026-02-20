@@ -7,10 +7,13 @@ import { confirm, text, isCancel } from "@clack/prompts";
 import { aiService } from "../services/ai.service.ts";
 import { getToolsForTask } from "../tools/index.ts";
 import { specStorage } from "../services/planning/spec-storage.ts";
+import { exportService } from "../services/planning/export.ts";
 import { buildSystemPrompt, formatSpecForPrompt } from "./prompts.ts";
-import { displayToolCall, displayToolResult, displaySeparator } from "./display.ts";
-import type { ToolCall, ToolResult } from "./display.ts";
+import { displayToolCall, displaySeparator } from "./display.ts";
+import type { ToolCall } from "./display.ts";
 import type { CoreMessage } from "ai";
+import fs from "fs";
+import path from "path";
 
 marked.use(
   markedTerminal({
@@ -27,6 +30,75 @@ marked.use(
     link: chalk.blue.underline,
   }) as Parameters<typeof marked.use>[0]
 );
+
+const PLAN_DIR = ".agentic-plan";
+const SESSION_FILE = `${PLAN_DIR}/session.json`;
+
+interface PlanningSession {
+  id: string;
+  startedAt: string;
+  lastActivity: string;
+  messages: CoreMessage[];
+  agreedApproach?: string;
+}
+
+function ensurePlanDir(): void {
+  if (!fs.existsSync(PLAN_DIR)) {
+    fs.mkdirSync(PLAN_DIR, { recursive: true });
+  }
+}
+
+function loadSession(): PlanningSession | null {
+  if (!fs.existsSync(SESSION_FILE)) {
+    return null;
+  }
+  try {
+    const data = fs.readFileSync(SESSION_FILE, "utf-8");
+    return JSON.parse(data);
+  } catch {
+    return null;
+  }
+}
+
+function saveSession(session: PlanningSession): void {
+  ensurePlanDir();
+  fs.writeFileSync(SESSION_FILE, JSON.stringify(session, null, 2), "utf-8");
+}
+
+function createNewSession(): PlanningSession {
+  return {
+    id: Date.now().toString(36),
+    startedAt: new Date().toISOString(),
+    lastActivity: new Date().toISOString(),
+    messages: [],
+  };
+}
+
+async function generateArchitectureDiagram(spec: any): Promise<void> {
+  const diagramContent = `# ${spec.title} - Architecture
+
+## System Overview
+${spec.goal}
+
+## Components
+
+${spec.inScope.map((item: string) => `- ${item}`).join("\n")}
+
+## Data Flow
+(TODO: Add flow diagram)
+
+## Tech Stack
+- Language: To be determined
+- Framework: To be determined
+
+---
+Generated: ${new Date().toISOString()}
+`;
+
+  const diagramPath = `${PLAN_DIR}/${spec.id}-architecture.md`;
+  fs.writeFileSync(diagramPath, diagramContent, "utf-8");
+  console.log(chalk.cyan(`📐 Architecture diagram saved to: ${diagramPath}`));
+}
 
 export async function runPlanExecution(specId: string): Promise<boolean> {
   const spec = specStorage.getSpec(specId);
@@ -104,7 +176,6 @@ DO NOT make any changes until the user explicitly confirms.`;
 
   let fullResponse = "";
 
-  // Merge system prompt (with skills/tools info) with task-specific instructions
   const combinedSystemPrompt = `${systemPrompt}
 
 ---
@@ -234,44 +305,86 @@ Start implementing now.`;
 }
 
 export async function runInteractivePlanning(): Promise<void> {
-  console.log(
-    boxen(
-      chalk.bold.cyan("🎯 Interactive Planning Mode\n\n") +
-      chalk.gray("Chat with me like a coworker. Tell me what you want to build,\n") +
-      chalk.gray("and I'll help you plan and implement it step by step.\n\n") +
-      chalk.yellow("Commands during chat:\n") +
-      chalk.white("  • 'create plan' - Generate a formal plan from our discussion\n") +
-      chalk.white("  • 'let's do it' - Start implementing\n") +
-      chalk.white("  • 'show plan' - See the current plan\n") +
-      chalk.white("  • 'exit' - End the session"),
-      {
-        padding: 1,
-        margin: { top: 1, bottom: 1 },
-        borderStyle: "round",
-        borderColor: "cyan",
-      }
-    )
-  );
+  ensurePlanDir();
+
+  let session = loadSession();
+  let isNewSession = false;
+
+  if (session) {
+    const resume = await confirm({
+      message: `Found a previous planning session from ${new Date(session.lastActivity).toLocaleString()}. Resume?`,
+      initialValue: true,
+    });
+
+    if (!resume) {
+      session = createNewSession();
+      isNewSession = true;
+    }
+  } else {
+    session = createNewSession();
+    isNewSession = true;
+  }
+
+  if (isNewSession) {
+    console.log(
+      boxen(
+        chalk.bold.cyan("🎯 Interactive Planning Session\n\n") +
+        chalk.gray("Let's plan something together. Tell me what you want to build.\n\n") +
+        chalk.yellow("How this works:\n") +
+        chalk.white("1. You tell me what you want to build\n") +
+        chalk.white("2. We discuss the approach together\n") +
+        chalk.white("3. We agree on the tech stack\n") +
+        chalk.white("4. I create a plan, tickets, and architecture\n\n") +
+        chalk.dim("Say 'exit' to save and quit anytime"),
+        {
+          padding: 1,
+          margin: { top: 1, bottom: 1 },
+          borderStyle: "round",
+          borderColor: "cyan",
+        }
+      )
+    );
+  } else {
+    console.log(
+      boxen(
+        chalk.bold.cyan("🎯 Resumed Planning Session\n\n") +
+        chalk.gray("Continuing from where we left off...\n"),
+        {
+          padding: 1,
+          margin: { top: 1, bottom: 1 },
+          borderStyle: "round",
+          borderColor: "cyan",
+        }
+      )
+    );
+  }
 
   await aiService.initialize();
 
   const systemPrompt = await buildSystemPrompt();
-  const messages: CoreMessage[] = [
-    {
+
+  if (session.messages.length === 0) {
+    session.messages.push({
       role: "system",
       content: `${systemPrompt}
 
 ---
-You are in interactive planning mode. The user wants to collaborate on building something.
-- Be conversational and helpful like a coworker
-- Ask clarifying questions to understand their needs
-- When they say "create plan" or "let's do it", generate a structured plan
-- Wait for their approval before making any code changes
-- Use tools to explore the codebase when needed`,
-    },
-  ];
+You are in a NEW planning conversation. The user will tell you what they want to build.
+Follow the Interactive Planning Session flow from the system prompt.
+Keep your FIRST response SHORT - just a friendly greeting and ask what they want to build.`,
+    });
+  } else {
+    session.messages.push({
+      role: "system",
+      content: `${systemPrompt}
 
-  let currentPlan: ReturnType<typeof specStorage.createSpec> | null = null;
+---
+You are resuming a previous planning conversation. The user wants to continue from where they left off.
+Keep your response SHORT - acknowledge you're back and ask how they want to proceed.`,
+    });
+  }
+
+  saveSession(session);
 
   while (true) {
     const userInput = await text({
@@ -280,93 +393,30 @@ You are in interactive planning mode. The user wants to collaborate on building 
     });
 
     if (isCancel(userInput)) {
-      console.log(chalk.yellow("\n👋 Goodbye!\n"));
-      process.exit(0);
+      console.log(chalk.yellow("\n👋 Goodbye! Session saved.\n"));
+      break;
     }
 
     const input = (userInput as string).trim();
 
     if (input.toLowerCase() === "exit" || input.toLowerCase() === "quit") {
-      console.log(chalk.yellow("\n👋 Goodbye!\n"));
+      console.log(chalk.yellow("\n👋 Goodbye! Session saved.\n"));
       break;
     }
 
-    if (input.toLowerCase() === "show plan" && currentPlan) {
-      console.log(boxen(formatSpecForPrompt(currentPlan), {
-        padding: 1,
-        borderStyle: "round",
-        borderColor: "cyan",
-        title: "📋 Current Plan",
-      }));
-      continue;
-    }
-
-    messages.push({ role: "user", content: input });
+    session.messages.push({ role: "user", content: input });
+    session.lastActivity = new Date().toISOString();
+    saveSession(session);
 
     let fullResponse = "";
     const spin = yoctoSpinner({ text: "Thinking...", color: "cyan" }).start();
 
-    const lowerInput = input.toLowerCase();
-    const shouldCreatePlan = lowerInput.includes("create plan") || lowerInput.includes("let's do it") || lowerInput.includes("lets do it");
-
-    if (shouldCreatePlan && !currentPlan) {
-      spin.stop();
-      const planPrompt = `Based on our conversation, create a structured implementation plan.
-      
-Respond with ONLY valid JSON:
-{
-  "title": "Short clear title",
-  "goal": "Detailed goal description", 
-  "inScope": ["item 1", "item 2"],
-  "outOfScope": ["excluded item"],
-  "acceptanceCriteria": ["criterion 1", "criterion 2"],
-  "fileBoundaries": ["src/..."]
-}`;
-
-      messages.push({ role: "user", content: planPrompt }, { role: "assistant", content: "" });
-
-      await aiService.sendMessage(
-        messages.slice(0, -1),
-        (chunk) => {
-          fullResponse += chunk;
-        },
-        getToolsForTask("code"),
-        undefined,
-        { maxSteps: 3 }
-      );
-
-      const jsonMatch = fullResponse.match(/\{[\s\S]*\}/);
-      if (jsonMatch) {
-        const planData = JSON.parse(jsonMatch[0]);
-        currentPlan = specStorage.createSpec(planData);
-        messages[messages.length - 1].content = fullResponse;
-
-        console.log(chalk.green.bold("\n📋 Plan created:\n"));
-        console.log(boxen(formatSpecForPrompt(currentPlan), {
-          padding: 1,
-          borderStyle: "round",
-          borderColor: "green",
-        }));
-
-        const shouldImplement = await confirm({
-          message: "Start implementing this plan?",
-          initialValue: false,
-        });
-
-        if (shouldImplement) {
-          await runPlanExecution(currentPlan.id);
-          return;
-        }
-      }
-      continue;
-    }
-
     await aiService.sendMessage(
-      messages,
+      session.messages,
       (chunk) => {
         if (fullResponse === "") {
           spin.stop();
-          console.log(chalk.green.bold("\n🤖 Assistant:\n"));
+          console.log(chalk.green.bold("\n🤖\n"));
           displaySeparator();
         }
         fullResponse += chunk;
@@ -383,9 +433,70 @@ Respond with ONLY valid JSON:
     if (fullResponse) {
       const rendered = marked.parse(fullResponse);
       console.log(rendered);
-      messages.push({ role: "assistant", content: fullResponse });
+      session.messages.push({ role: "assistant", content: fullResponse });
+      session.lastActivity = new Date().toISOString();
+      saveSession(session);
     }
 
     displaySeparator();
+
+    const planReadyFile = `${PLAN_DIR}/plan-ready.txt`;
+    if (fs.existsSync(planReadyFile)) {
+      const agreedApproach = fs.readFileSync(planReadyFile, "utf-8").trim();
+      fs.unlinkSync(planReadyFile);
+
+      console.log(chalk.cyan("\n🤖 Creating implementation plan...\n"));
+
+      const { createSpecFromAI } = await import("../commands/plan.command.js");
+      const specData = await createSpecFromAI(agreedApproach);
+
+      if (specData) {
+        const spec = specStorage.createSpec(specData);
+        console.log(chalk.green(`\n✅ Created plan: ${spec.title}\n`));
+
+        console.log(chalk.cyan("📝 Generating tickets...\n"));
+        try {
+          exportService.exportTickets(spec.id, "tasks", undefined);
+          console.log(chalk.green("✓ Tickets generated\n"));
+        } catch (e) {
+          console.log(chalk.yellow("⚠️ Could not generate tickets\n"));
+        }
+
+        console.log(chalk.cyan("📐 Creating architecture diagram...\n"));
+        try {
+          await generateArchitectureDiagram(spec);
+          console.log(chalk.green("✓ Architecture diagram created\n"));
+        } catch (e) {
+          console.log(chalk.yellow("⚠️ Could not create architecture diagram\n"));
+        }
+
+        console.log(
+          boxen(
+            chalk.bold.cyan("Plan Summary\n\n") +
+            formatSpecForPrompt(spec),
+            {
+              padding: 1,
+              borderStyle: "round",
+              borderColor: "cyan",
+            }
+          )
+        );
+
+        const execute = await confirm({
+          message: "Ready for me to implement this?",
+          initialValue: true,
+        });
+
+        if (execute) {
+          fs.unlinkSync(SESSION_FILE);
+          await runPlanExecution(spec.id);
+          return;
+        } else {
+          console.log(chalk.yellow("\nPlan saved. Run 'agentic plan run' later to execute.\n"));
+          console.log(chalk.dim("Session ended. Your discussion is saved.\n"));
+          break;
+        }
+      }
+    }
   }
 }
