@@ -1,1 +1,15 @@
-Agreed Approach: Build an authentication system for a web application and API using an established GoLang authentication library/framework.
+Planning agreement summary:
+
+I wanna build an authentication system
+
+I wanna build it for a web application and also provide api
+
+Web would be use a pre built framework as needed and for API exposing some of the things as needed What do you think?
+
+You suggest once
+
+Oauth and social logins
+
+yeah
+
+yup

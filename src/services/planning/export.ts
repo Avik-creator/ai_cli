@@ -26,6 +26,23 @@ interface ExportView {
   }>;
 }
 
+interface CapabilityFlags {
+  auth: boolean;
+  mfa: boolean;
+  sso: boolean;
+  database: boolean;
+  api: boolean;
+}
+
+interface JiraStory {
+  key: string;
+  title: string;
+  objective: string;
+  acceptance: string[];
+  subtasks: string[];
+  dependencies: string[];
+}
+
 const ANSI_ESCAPE_RE = /\u001b\[[0-9;]*m/g;
 const TRANSCRIPT_PREFIX_RE = /^\s*(USER|ASSISTANT|SYSTEM|TOOL)\s*:/i;
 const CONTROL_LINE_RE = /^\s*(create plan|status|recap|help|exit|\/[a-z0-9-]+)\s*$/i;
@@ -172,6 +189,194 @@ function toExportView(spec: SpecItem): ExportView {
   };
 }
 
+function inferCapabilities(view: ExportView): CapabilityFlags {
+  const corpus = `${view.goal} ${view.description} ${view.inScope.join(" ")} ${view.acceptanceCriteria.join(" ")}`.toLowerCase();
+  return {
+    auth: /\bauth|login|jwt|session|token|credential|password|identity|signin|sign-up|signup/.test(corpus),
+    mfa: /\bmfa|otp|totp|sms|2fa|two-factor/.test(corpus),
+    sso: /\bsso|oauth|oidc|auth0|identity provider|idp/.test(corpus),
+    database: /\bdb|database|sql|postgres|mysql|redis|store|persistence/.test(corpus),
+    api: /\bapi|backend|service|endpoint|route|http/.test(corpus),
+  };
+}
+
+function isPlaceholderScopeItem(item: string): boolean {
+  const normalized = item.trim().toLowerCase();
+  return (
+    normalized.includes("break work into small implementation tasks") ||
+    normalized.includes("implement core requirements") ||
+    normalized.includes("agreed direction") ||
+    normalized.includes("verification for completed behavior")
+  );
+}
+
+function hasMeaningfulScope(view: ExportView): boolean {
+  if (view.inScope.length === 0) {
+    return false;
+  }
+  return view.inScope.some((item) => !isPlaceholderScopeItem(item));
+}
+
+function boundarySummary(view: ExportView): string {
+  const top = view.fileBoundaries.slice(0, 3).join(", ");
+  return top || "src/**";
+}
+
+function deriveJiraSubtasks(
+  storyTitle: string,
+  view: ExportView,
+  capabilities: CapabilityFlags,
+  seedSubtasks: string[] = []
+): string[] {
+  const scopedBoundaries = boundarySummary(view);
+  const generic = [
+    `Design/confirm implementation details for "${storyTitle}" and update plan notes.`,
+    `Implement code changes for "${storyTitle}" within ${scopedBoundaries}.`,
+    `Add tests for "${storyTitle}" to satisfy relevant acceptance criteria.`,
+    `Update docs/changelog and rollout notes for "${storyTitle}".`,
+  ];
+
+  const authSpecific: string[] = [];
+  if (capabilities.auth) {
+    authSpecific.push("Implement secure credential/session handling with proper token validation.");
+  }
+  if (capabilities.mfa) {
+    authSpecific.push("Implement MFA challenge flow (enroll, verify, fallback) and failure handling.");
+  }
+  if (capabilities.sso) {
+    authSpecific.push("Integrate with SSO/OIDC provider and map external identity claims safely.");
+  }
+  if (capabilities.database) {
+    authSpecific.push("Add persistence updates (schemas/models/migrations) and data integrity checks.");
+  }
+
+  const combined = [...seedSubtasks, ...authSpecific, ...generic];
+  return Array.from(new Set(combined)).slice(0, 7);
+}
+
+function deriveJiraStories(view: ExportView): JiraStory[] {
+  const capabilities = inferCapabilities(view);
+  const stories: JiraStory[] = [];
+  const defaultAcceptance = view.acceptanceCriteria.length > 0
+    ? view.acceptanceCriteria
+    : ["Implementation is complete and verifiable."];
+
+  if (view.phases.length > 0) {
+    for (let i = 0; i < view.phases.length; i++) {
+      const phase = view.phases[i];
+      const key = `AUTH-${i + 1}`;
+      const phaseTasks = phase.tasks.length > 0
+        ? phase.tasks.map((task) => `Implement task: ${task}`)
+        : [];
+      stories.push({
+        key,
+        title: phase.title,
+        objective: phase.description || `Deliver ${phase.title}.`,
+        acceptance: defaultAcceptance.slice(0, 3),
+        subtasks: deriveJiraSubtasks(phase.title, view, capabilities, phaseTasks),
+        dependencies: i > 0 ? [`AUTH-${i}`] : [],
+      });
+    }
+    return stories;
+  }
+
+  if (hasMeaningfulScope(view)) {
+    for (let i = 0; i < view.inScope.length; i++) {
+      const item = view.inScope[i];
+      const key = `AUTH-${i + 1}`;
+      stories.push({
+        key,
+        title: clipText(item, 100),
+        objective: `Deliver scoped work item: ${item}.`,
+        acceptance: defaultAcceptance.slice(0, 3),
+        subtasks: deriveJiraSubtasks(item, view, capabilities),
+        dependencies: i > 0 ? [`AUTH-${i}`] : [],
+      });
+    }
+    return stories;
+  }
+
+  if (capabilities.auth) {
+    const authStories = [
+      {
+        title: "Authentication foundation and library integration",
+        objective: "Set up the chosen auth framework/library and baseline security configuration.",
+        seedSubtasks: [
+          "Define auth configuration model and environment variable contract.",
+          "Implement middleware/interceptors for request authentication.",
+        ],
+      },
+      {
+        title: "Authentication flows and session/token lifecycle",
+        objective: "Implement sign-in/session/token issuance, refresh, and invalidation behavior.",
+        seedSubtasks: [
+          "Implement login and token issuance/validation flow.",
+          "Implement refresh/revocation and secure session termination.",
+        ],
+      },
+      {
+        title: "Route protection, verification, and hardening",
+        objective: "Protect sensitive routes and validate behavior with robust tests.",
+        seedSubtasks: [
+          "Apply authorization checks to protected endpoints.",
+          "Add negative-path tests for invalid/expired credentials and forbidden access.",
+        ],
+      },
+    ];
+
+    if (capabilities.mfa) {
+      authStories.splice(2, 0, {
+        title: "MFA enrollment and verification flows",
+        objective: "Implement MFA factors and challenge/verification logic.",
+        seedSubtasks: [
+          "Implement MFA enrollment endpoints and factor management.",
+          "Implement one-time code verification and retry/lockout behavior.",
+        ],
+      });
+    }
+
+    if (capabilities.sso) {
+      authStories.splice(1, 0, {
+        title: "SSO/OIDC provider integration",
+        objective: "Integrate with external identity provider and claim mapping.",
+        seedSubtasks: [
+          "Implement OIDC/OAuth callback and token validation.",
+          "Map external claims to local user/session model.",
+        ],
+      });
+    }
+
+    for (let i = 0; i < authStories.length; i++) {
+      const story = authStories[i];
+      const key = `AUTH-${i + 1}`;
+      stories.push({
+        key,
+        title: story.title,
+        objective: story.objective,
+        acceptance: defaultAcceptance.slice(0, 3),
+        subtasks: deriveJiraSubtasks(story.title, view, capabilities, story.seedSubtasks),
+        dependencies: i > 0 ? [`AUTH-${i}`] : [],
+      });
+    }
+    return stories;
+  }
+
+  for (let i = 0; i < defaultAcceptance.length; i++) {
+    const criterion = defaultAcceptance[i];
+    const key = `AUTH-${i + 1}`;
+    stories.push({
+      key,
+      title: `Deliver acceptance criterion ${i + 1}`,
+      objective: criterion,
+      acceptance: [criterion],
+      subtasks: deriveJiraSubtasks(`Acceptance criterion ${i + 1}`, view, capabilities),
+      dependencies: i > 0 ? [`AUTH-${i}`] : [],
+    });
+  }
+
+  return stories;
+}
+
 function formatPlanAsMarkdown(spec: SpecItem): string {
   const view = toExportView(spec);
   let md = `# ${view.title}\n\n`;
@@ -289,74 +494,63 @@ function formatAsGitHubIssues(spec: SpecItem): string {
 
 function formatAsJiraMarkdown(spec: SpecItem): string {
   const view = toExportView(spec);
-  let output = `h1. ${view.title}\n\n`;
+  const stories = deriveJiraStories(view);
+  const epicKey = "AUTH-EPIC";
+  const labels = ["agentic-plan", "scope-locked", "ai-generated"];
+  const boundaryText = boundarySummary(view);
 
-  output += `*Goal:* ${view.goal}\n\n`;
-
-  if (view.description) {
-    output += `||Description||\n|${view.description}|\n\n`;
+  let output = `# Jira Ticket Pack: ${view.title}\n\n`;
+  output += "## Epic\n\n";
+  output += `- **Type:** Epic\n`;
+  output += `- **Key:** ${epicKey}\n`;
+  output += `- **Summary:** ${view.title}\n`;
+  output += `- **Objective:** ${view.goal}\n`;
+  output += `- **Labels:** ${labels.join(", ")}\n`;
+  output += `- **File Boundaries:** ${boundaryText}\n`;
+  if (view.outOfScope.length > 0) {
+    output += `- **Out of Scope:** ${view.outOfScope.join("; ")}\n`;
   }
+  output += "\n";
 
-  if (view.inScope.length > 0) {
-    output += "h2. In Scope\n";
-    for (const item of view.inScope) {
-      output += `* ${item}\n`;
+  output += "## Stories and Subtasks\n\n";
+  for (const story of stories) {
+    output += `### ${story.key} - ${story.title}\n\n`;
+    output += "- **Type:** Story\n";
+    output += `- **Parent:** ${epicKey}\n`;
+    output += `- **Objective:** ${story.objective}\n`;
+    if (story.dependencies.length > 0) {
+      output += `- **Depends On:** ${story.dependencies.join(", ")}\n`;
+    }
+    output += `- **Scope Boundary:** ${boundaryText}\n\n`;
+
+    output += "#### Acceptance Criteria\n";
+    for (const criterion of story.acceptance) {
+      output += `- [ ] ${criterion}\n`;
+    }
+    output += "\n";
+
+    output += "#### Subtasks\n";
+    for (let idx = 0; idx < story.subtasks.length; idx++) {
+      output += `${idx + 1}. [ ] ${story.key}-SUB${idx + 1}: ${story.subtasks[idx]}\n`;
     }
     output += "\n";
   }
 
-  if (view.acceptanceCriteria.length > 0) {
-    output += "h2. Acceptance Criteria\n";
-    for (let i = 1; i <= view.acceptanceCriteria.length; i++) {
-      output += `# ${i}. ${view.acceptanceCriteria[i - 1]}\n`;
-    }
-    output += "\n";
-  }
+  output += "## Delivery Notes\n\n";
+  output += "- Run verification checks before moving a story to Done.\n";
+  output += "- Confirm changed files stay within declared file boundaries.\n";
+  output += "- Link PR(s) back to Story keys and acceptance criteria.\n";
 
   return output;
 }
 
 function formatAsTasks(spec: SpecItem): string {
-  const view = toExportView(spec);
-  let output = `# Task Breakdown for: ${view.title}\n\n`;
-
-  output += "## Overview\n";
-  output += `- Goal: ${view.goal}\n`;
-  output += `- Total Criteria: ${view.acceptanceCriteria.length}\n`;
-  output += `- Phases: ${view.phases.length}\n\n`;
-
-  if (view.phases.length > 0) {
-    output += "## Phases & Tasks\n\n";
-    for (const phase of view.phases) {
-      output += `### ${phase.title} (${phase.status})\n`;
-      if (phase.description) {
-        output += `${phase.description}\n\n`;
-      }
-
-      if (phase.tasks.length > 0) {
-        output += "| Task | Status |\n";
-        output += "|------|--------|\n";
-        for (const task of phase.tasks) {
-          const status = phase.status === "completed" ? "✅" : phase.status === "in_progress" ? "🔄" : "⬜";
-          output += `| ${task} | ${status} |\n`;
-        }
-      }
-      output += "\n";
-    }
-  } else {
-    output += "## Tasks (from Acceptance Criteria)\n\n";
-    output += "| # | Task | Status |\n";
-    output += "|---|------|--------|\n";
-    for (let i = 1; i <= view.acceptanceCriteria.length; i++) {
-      output += `| ${i} | ${view.acceptanceCriteria[i - 1]} | ⬜ |\n`;
-    }
-  }
-
-  return output;
+  return formatAsJiraMarkdown(spec);
 }
 
 function formatArchitectureAsMarkdown(spec: SpecItem): string {
   const view = toExportView(spec);
+  const capabilities = inferCapabilities(view);
   const components = view.inScope.length > 0
     ? view.inScope.map((item) => `- ${item}`).join("\n")
     : "- Core application components";
@@ -365,7 +559,74 @@ function formatArchitectureAsMarkdown(spec: SpecItem): string {
     ? view.fileBoundaries.map((boundary) => `- \`${boundary}\``).join("\n")
     : "- `src/**`";
 
+  const coreLayers = [
+    "| Layer | Responsibility |",
+    "|---|---|",
+    `| Interface Layer | Client/API surface, input validation, request routing |`,
+    `| Identity Layer | Authentication/session handling and policy checks |`,
+    `| Application Layer | Feature orchestration and business rules |`,
+    `| Data Layer | Persistent user/auth state and audit-related records |`,
+    `| Verification Layer | Test and drift checks before completion/merge |`,
+  ].join("\n");
+
+  const integrationLines = [
+    "- Auth library/framework configured as single source of truth for identity.",
+    capabilities.sso ? "- External SSO/OIDC provider handles federated identity assertions." : "- Local auth provider or built-in identity handler validates credentials/tokens.",
+    capabilities.mfa ? "- MFA factor service (TOTP/SMS) is invoked for challenge and verification." : "- MFA is optional/not explicitly required in current scope.",
+    capabilities.database ? "- Database/state store persists users, sessions, factor enrollment, and audit entries." : "- Lightweight state handling is acceptable unless persistence requirements expand.",
+  ].join("\n");
+
+  const dataContracts = [
+    "- Auth/User model: user id, identity claims, status flags, role/permission references.",
+    "- Session/Token model: issued-at, expiry, revocation state, audience/scope.",
+    capabilities.mfa
+      ? "- MFA model: factor type, enrollment metadata, verification counters/lock state."
+      : "- MFA model: reserved for future extension.",
+    "- Audit model: actor, action, target resource, timestamp, result.",
+  ].join("\n");
+
+  const flowSteps = [
+    "1. Client calls protected endpoint through API/interface layer.",
+    "2. Identity layer validates session/token and loads user context.",
+    capabilities.sso
+      ? "3. If federated login is used, identity claims are verified against SSO/OIDC provider."
+      : "3. Credential/token checks complete locally in auth module.",
+    capabilities.mfa
+      ? "4. For sensitive actions, MFA challenge/verification is executed before granting access."
+      : "4. Access policy checks continue without mandatory MFA branch.",
+    "5. Application layer executes business logic and persists required state.",
+    "6. Audit/verification pipeline validates behavior and scope compliance before completion.",
+  ].join("\n");
+
+  const riskLines = [
+    "- Drift risk: enforce file boundaries during implementation and diff audit.",
+    "- Security risk: reject weak token/session handling and missing negative-path tests.",
+    "- Delivery risk: map each story/subtask to acceptance criteria to avoid orphaned changes.",
+    capabilities.sso ? "- Integration risk: handle provider downtime/claim mismatch fallback paths." : "- Integration risk: validate auth library updates against compatibility constraints.",
+  ].join("\n");
+
+  const mermaidLines: string[] = [
+    "flowchart LR",
+    '    user["End User / Client"] --> edge["API Interface Layer"]',
+    '    edge --> auth["Identity/Auth Layer"]',
+  ];
+  if (capabilities.sso) {
+    mermaidLines.push('    auth --> idp["SSO/OIDC Provider"]');
+  }
+  if (capabilities.mfa) {
+    mermaidLines.push('    auth --> mfa["MFA Service"]');
+    mermaidLines.push('    mfa --> comms["OTP/SMS Channel"]');
+  }
+  mermaidLines.push('    auth --> app["Application Services"]');
+  mermaidLines.push('    app --> store["Data Store"]');
+  mermaidLines.push('    app --> audit["Audit/Verification Layer"]');
+  mermaidLines.push('    audit --> gate["Scope + Test Gate"]');
+  mermaidLines.push('    gate --> done["Ready to Merge"]');
+
   return `# ${view.title} - Architecture
+
+## Architecture Intent
+${view.goal}
 
 ## In-Scope Components
 ${components}
@@ -373,15 +634,24 @@ ${components}
 ## File Boundaries
 ${boundaries}
 
+## Layered Design
+${coreLayers}
+
+## Integration Points
+${integrationLines}
+
+## Data Contracts
+${dataContracts}
+
+## Request-to-Delivery Flow
+${flowSteps}
+
+## Risks and Guardrails
+${riskLines}
+
 ## Diagram
 \`\`\`mermaid
-flowchart TD
-    user["Developer"] --> cli["agentic CLI"]
-    cli --> spec["Spec Contract"]
-    spec --> exec["Execution Layer"]
-    exec --> diff["Git Diff Audit"]
-    diff --> gate["Drift Gate"]
-    gate --> commit["Confirmed Commit"]
+${mermaidLines.join("\n")}
 \`\`\`
 
 ---
@@ -496,7 +766,7 @@ export const exportService = {
     const architecturePath = join(baseDir, `${spec.id}-architecture.md`);
 
     this.exportPlan(specId, "markdown", planPath);
-    this.exportTickets(specId, "tasks", ticketsPath);
+    this.exportTickets(specId, "jira", ticketsPath);
     this.exportArchitecture(specId, architecturePath);
 
     return { planPath, ticketsPath, architecturePath };

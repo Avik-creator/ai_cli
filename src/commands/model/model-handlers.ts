@@ -5,6 +5,7 @@ import { AVAILABLE_MODELS, getModelsByProvider, config, getCurrentProvider } fro
 import { getCustomModels, addCustomModel, removeCustomModel } from "../../config/custom-models.ts";
 import { PROVIDERS, PROVIDER_MODELS, type Model } from "../../config/providers.ts";
 import { aiService } from "../../services/ai.service.ts";
+import { sessionManager } from "../../services/session-manager.ts";
 import * as ui from "../../utils/ui.ts";
 
 export async function listAction(): Promise<void> {
@@ -369,6 +370,7 @@ export async function customListAction(): Promise<void> {
 
 export async function switchAction(modelId: string | undefined): Promise<void> {
   const currentModelId = config.getModel();
+  let latestSessionId: string | null = null;
   
   if (!modelId) {
     intro(chalk.bold.cyan("🔄 Model Switch"));
@@ -380,7 +382,6 @@ export async function switchAction(modelId: string | undefined): Promise<void> {
     console.log(chalk.gray(`Current model: ${chalk.white(currentModelId)}`));
     console.log(chalk.gray(`Provider: ${chalk.white(provider.name)}\n`));
     
-    const { sessionManager } = await import("../../services/session-manager.ts");
     const hasSession = sessionManager.getSessionCount() > 0;
     
     if (hasSession) {
@@ -397,6 +398,17 @@ export async function switchAction(modelId: string | undefined): Promise<void> {
       if (!continueWithSummary) {
         outro(chalk.yellow("Model switch cancelled - use 'agentic model set' for new session"));
         return;
+      }
+
+      const latestSession = sessionManager.listSessions(1)[0];
+      if (latestSession) {
+        latestSessionId = latestSession.id;
+        const summary = await sessionManager.summarizeForModelSwitch(latestSession.id, currentModelId);
+        if (summary) {
+          ui.success("✓ Generated context summary for latest session");
+        } else {
+          ui.warning("No summary generated (session may be too short).");
+        }
       }
     }
     
@@ -419,6 +431,16 @@ export async function switchAction(modelId: string | undefined): Promise<void> {
   }
   
   await config.setModel(modelId);
-  
-  console.log(chalk.green(`\n✓ Model switched to: ${modelId}\n`));
+
+  try {
+    await aiService.setModel(modelId);
+    console.log(chalk.green(`\n✓ Model switched to: ${modelId}\n`));
+  } catch (error) {
+    const errMsg = error instanceof Error ? error.message : String(error);
+    ui.warning(`Model saved but initialization failed: ${errMsg}`);
+  }
+
+  if (latestSessionId) {
+    ui.dim(`Resume with summarized context: agentic -s ${latestSessionId}`);
+  }
 }

@@ -6,8 +6,10 @@ import {
   storeApiKey,
   getCurrentProvider,
   setCurrentProvider,
+  config,
 } from "../../config/env.ts";
 import { PROVIDERS, getAllProviders } from "../../config/providers.ts";
+import { resolveModelForProvider } from "../../config/model-resolution.ts";
 import { installPackage } from "./package-installer.js";
 import * as ui from "../../utils/ui.ts";
 
@@ -82,12 +84,19 @@ export async function providerSetAction(providerId?: string): Promise<void> {
   }
 
   await setCurrentProvider(selectedProvider.id);
+  const previousModel = config.getModel();
+  const nextModel = await resolveModelForProvider(selectedProvider.id, previousModel);
+  await config.setModel(nextModel);
   
   ui.successBox(`Provider set to: ${selectedProvider.name}`, {
     title: "✅ Success",
   });
   ui.dim(`Description: ${selectedProvider.description}`);
   ui.dim(`API Key: ${selectedProvider.apiKeyName}`);
+  ui.dim(`Model: ${nextModel}`);
+  if (nextModel !== previousModel) {
+    ui.dim(chalk.gray(`  (switched from ${previousModel} for provider compatibility)`));
+  }
 
   if (selectedProvider.package) {
     try {

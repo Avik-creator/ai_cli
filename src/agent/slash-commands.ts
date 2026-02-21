@@ -4,6 +4,7 @@ import { select, isCancel, confirm, text, multiselect } from "@clack/prompts";
 import { config, AVAILABLE_MODELS, getModelsByProvider, getCurrentProvider, setCurrentProvider } from "../config/env.ts";
 import { PROVIDERS, PROVIDER_MODELS, type Model } from "../config/providers.ts";
 import { getCustomModels } from "../config/custom-models.ts";
+import { resolveModelForProvider } from "../config/model-resolution.ts";
 import { aiService } from "../services/ai.service.ts";
 import { sessionManager } from "../services/session-manager.ts";
 import { PERSONALITIES } from "../services/storage/user-preferences.js";
@@ -78,31 +79,6 @@ function messageContentToText(content: CoreMessage["content"]): string {
     })
     .join(" ")
     .trim();
-}
-
-async function resolveModelForProvider(providerId: string, currentModelId: string): Promise<string> {
-  const customModels = await getCustomModels();
-
-  if (providerId === "gateway") {
-    return currentModelId || AVAILABLE_MODELS[0]?.id || "openai/gpt-5-mini";
-  }
-
-  if (providerId === "openrouter") {
-    return currentModelId || PROVIDER_MODELS.openrouter?.[0]?.id || "openai/gpt-4o-mini";
-  }
-
-  const providerModels = PROVIDER_MODELS[providerId] || [];
-  const customForProvider = customModels.filter((m) => m.provider === providerId);
-
-  const modelSupported =
-    providerModels.some((m) => m.id === currentModelId) ||
-    customForProvider.some((m) => m.id === currentModelId);
-
-  if (modelSupported) {
-    return currentModelId;
-  }
-
-  return providerModels[0]?.id || customForProvider[0]?.id || currentModelId;
 }
 
 async function applyProviderChange(providerId: string): Promise<SlashCommandResult> {
