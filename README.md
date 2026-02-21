@@ -65,6 +65,7 @@ agentic config provider set google
 agentic config provider set groq
 agentic config provider set mistral
 agentic config provider set xai
+agentic config provider set openrouter
 agentic config provider set gateway  # Vercel AI Gateway (default)
 ```
 
@@ -76,6 +77,7 @@ agentic config provider set gateway  # Vercel AI Gateway (default)
 - **Groq** - Fast inference for Llama, Mixtral, Gemma models
 - **Mistral AI** - Mistral Large, Medium, Small models
 - **xAI Grok** - Grok 4, Grok 3, Grok 2 models
+- **OpenRouter** - Unified API access to models across providers with one key
 
 ### 2. Configure API Keys
 
@@ -120,6 +122,7 @@ The API key you need depends on your selected provider:
 | Groq | `GROQ_API_KEY` | [Groq Console](https://console.groq.com/keys) |
 | Mistral | `MISTRAL_API_KEY` | [Mistral Console](https://console.mistral.ai/api-keys) |
 | xAI | `XAI_API_KEY` | [xAI Console](https://console.x.ai/api-keys) |
+| OpenRouter | `OPENROUTER_API_KEY` | [OpenRouter Keys](https://openrouter.ai/keys) |
 
 **Optional Keys:**
 - `EXA_API_KEY` - For web search functionality ([Exa AI](https://exa.ai))
@@ -145,6 +148,7 @@ bun add @ai-sdk/google@latest      # For Google (v2.0.0+)
 bun add @ai-sdk/groq@latest        # For Groq (v2.0.0+)
 bun add @ai-sdk/mistral@latest     # For Mistral (v2.0.0+)
 bun add @ai-sdk/xai@latest         # For xAI (v2.0.0+)
+bun add @openrouter/ai-sdk-provider@latest  # For OpenRouter
 ```
 
 **AI SDK 5 Compatibility:**
@@ -177,6 +181,7 @@ agentic config provider set
 agentic config provider set openai
 agentic config provider set anthropic
 agentic config provider set groq
+agentic config provider set openrouter
 agentic config provider set gateway
 ```
 
@@ -199,6 +204,8 @@ agentic model set
 # Set a specific model directly
 agentic model set openai/gpt-5-mini
 agentic model set anthropic/claude-sonnet-4.5
+# For OpenRouter or custom IDs, unknown IDs are added automatically as custom models
+agentic model set z-ai/glm-4.5-air:free
 
 # Show current model
 agentic model current
@@ -279,6 +286,7 @@ agentic model switch claude-sonnet-4.5
 - **Groq**: `llama-3.3-70b-versatile`, `mixtral-8x7b-32768`, `qwen/qwen3-32b`
 - **Mistral**: `mistral-large-latest`, `mistral-medium-latest`, `pixtral-large-latest`
 - **xAI**: `grok-4`, `grok-3`, `grok-3-fast`
+- **OpenRouter**: `anthropic/claude-3.5-sonnet`, `meta-llama/llama-3.1-405b-instruct`, `openai/gpt-4o-mini`
 
 Set a default model via environment variable:
 ```bash

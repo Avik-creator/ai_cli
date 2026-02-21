@@ -49,7 +49,7 @@ export const configCommand = new Command("config")
       .addCommand(
         new Command("set")
           .description("Set the AI provider")
-          .argument("[provider-id]", "Provider ID (e.g., openai, anthropic, google)")
+          .argument("[provider-id]", "Provider ID (e.g., openai, anthropic, google, groq, openrouter)")
           .action(providerSetAction)
       )
       .addCommand(

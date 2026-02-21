@@ -133,7 +133,10 @@ export async function setAction(keyName: string, value: string): Promise<void> {
   if (!keyName || !value) {
     ui.error("Usage: agentic config set <KEY_NAME> <value>");
     ui.dim("\nAvailable keys:");
-    ui.dim("  AI_GATEWAY_API_KEY");
+    const providerKeys = Array.from(new Set(Object.values(PROVIDERS).map((provider) => provider.apiKeyName)));
+    for (const key of providerKeys) {
+      ui.dim(`  ${key}`);
+    }
     ui.dim("  EXA_API_KEY");
     ui.dim("  GITHUB_TOKEN");
     return;

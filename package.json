@@ -53,6 +53,7 @@
     "@ai-sdk/xai": "^2.0.40",
     "@clack/prompts": "^0.11.0",
     "@exalabs/ai-sdk": "^1.0.5",
+    "@openrouter/ai-sdk-provider": "^1.2.0",
     "@types/marked-terminal": "^6.1.1",
     "ai": "^5.0.89",
     "boxen": "^8.0.1",

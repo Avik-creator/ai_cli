@@ -100,6 +100,17 @@ export const PROVIDERS: Record<string, Provider> = {
     importPath: "@ai-sdk/xai",
     modelPrefix: "", // Models are like "grok-4"
   },
+  openrouter: {
+    id: "openrouter",
+    name: "OpenRouter",
+    description: "Unified access to models from multiple providers with one API key",
+    apiKeyName: "OPENROUTER_API_KEY",
+    apiKeyEnv: "OPENROUTER_API_KEY",
+    link: "https://openrouter.ai/keys",
+    package: "@openrouter/ai-sdk-provider",
+    importPath: "@openrouter/ai-sdk-provider",
+    modelPrefix: "", // Models are like "anthropic/claude-3.5-sonnet"
+  },
 };
 
 /**
@@ -170,5 +181,11 @@ export const PROVIDER_MODELS: Record<string, Model[]> = {
     { id: "grok-3-mini", name: "Grok 3 Mini" },
     { id: "grok-2", name: "Grok 2" },
   ],
+  openrouter: [
+    { id: "anthropic/claude-3.5-sonnet", name: "Claude 3.5 Sonnet (OpenRouter)" },
+    { id: "meta-llama/llama-3.1-405b-instruct", name: "Llama 3.1 405B Instruct (OpenRouter)" },
+    { id: "openai/gpt-4o-mini", name: "GPT-4o Mini (OpenRouter)" },
+    { id: "google/gemini-2.0-flash-001", name: "Gemini 2.0 Flash (OpenRouter)" },
+    { id: "mistralai/mistral-large", name: "Mistral Large (OpenRouter)" },
+  ],
 };
-

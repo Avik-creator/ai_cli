@@ -125,6 +125,47 @@ function logVerboseAIError(context: string, error: unknown): void {
   }
 }
 
+function isModuleNotFoundError(error: unknown): boolean {
+  const err = error as NodeJS.ErrnoException;
+  const message = err?.message || "";
+  return err?.code === "ERR_MODULE_NOT_FOUND" || message.includes("Cannot find module");
+}
+
+function createProviderModelFactory(
+  provider: Provider,
+  providerModule: Record<string, unknown>,
+  apiKey: string
+): (modelId: string) => LanguageModel {
+  if (provider.id === "openrouter") {
+    const directOpenrouterFn = providerModule.openrouter as ((modelId: string) => LanguageModel) | undefined;
+    const createOpenRouter =
+      (providerModule.createOpenRouter as ((options: { apiKey: string }) => { chat: (modelId: string) => LanguageModel }) | undefined) ||
+      (providerModule.default as ((options: { apiKey: string }) => { chat: (modelId: string) => LanguageModel }) | undefined);
+
+    if (typeof createOpenRouter === "function") {
+      const openrouter = createOpenRouter({ apiKey });
+      if (!openrouter || typeof openrouter.chat !== "function") {
+        throw new Error(`Provider "${provider.id}" did not return a valid chat() model factory`);
+      }
+
+      return (modelId: string) => openrouter.chat(modelId);
+    }
+
+    if (typeof directOpenrouterFn === "function") {
+      return directOpenrouterFn;
+    }
+
+    throw new Error(`Provider "${provider.id}" is missing createOpenRouter/openrouter export`);
+  }
+
+  const providerFn = (providerModule[provider.id] || providerModule.default || providerModule) as ((modelId: string) => LanguageModel);
+  if (typeof providerFn !== "function") {
+    throw new Error(`Provider "${provider.id}" is not a function`);
+  }
+
+  return providerFn;
+}
+
 export class AIService {
   private model: ModelInstance | null = null;
   private initialized = false;
@@ -172,19 +213,15 @@ export class AIService {
       // when AI_GATEWAY_API_KEY is set
       this.providerInstance = null;
     } else {
-      // Load provider dynamically
       try {
         const providerModule = await import(provider.importPath!);
-        // Provider exports are usually named exports (e.g., `openai`, `anthropic`)
-        // or default exports
-        const providerFn = (providerModule[provider.id] || providerModule.default || providerModule) as ((modelId: string) => LanguageModel);
-        if (typeof providerFn !== "function") {
-          throw new Error(`Provider "${provider.id}" is not a function`);
-        }
-        this.providerInstance = providerFn;
+        this.providerInstance = createProviderModelFactory(
+          provider,
+          providerModule as Record<string, unknown>,
+          apiKey
+        );
       } catch (error) {
-        const err = error as NodeJS.ErrnoException;
-        if (err.code === "ERR_MODULE_NOT_FOUND" || err.message.includes("Cannot find module")) {
+        if (isModuleNotFoundError(error)) {
           // Try to install the package automatically
           console.log(
             chalk.yellow(
@@ -197,11 +234,11 @@ export class AIService {
             await this.installProviderPackage(provider.package!);
             // Retry import after installation
             const providerModule = await import(provider.importPath!);
-            const providerFn = (providerModule[provider.id] || providerModule.default || providerModule) as ((modelId: string) => LanguageModel);
-            if (typeof providerFn !== "function") {
-              throw new Error(`Provider "${provider.id}" is not a function`);
-            }
-            this.providerInstance = providerFn;
+            this.providerInstance = createProviderModelFactory(
+              provider,
+              providerModule as Record<string, unknown>,
+              apiKey
+            );
             console.log(chalk.green(`✓ ${provider.package} installed successfully\n`));
           } catch (installError) {
             const installErr = installError as Error;

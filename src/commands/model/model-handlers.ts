@@ -176,13 +176,29 @@ export async function setAction(modelId: string | undefined): Promise<void> {
 
   const currentProviderId = await getCurrentProvider();
   const providerModels = PROVIDER_MODELS[currentProviderId] || [];
-  const allModels = [...AVAILABLE_MODELS, ...providerModels, ...(await getCustomModels())];
+  const customModels = await getCustomModels();
+  const allModels = [...AVAILABLE_MODELS, ...providerModels, ...customModels];
   let model = allModels.find((m) => m.id === modelId);
 
   if (!model) {
-    ui.errorBox(`Model "${modelId}" not found`);
-    ui.warning("\nRun 'agentic model list' to see available models.\n");
-    return;
+    const inferredProvider = currentProviderId;
+    model = {
+      id: modelId,
+      name: modelId,
+      provider: inferredProvider,
+    };
+
+    try {
+      const exists = customModels.some((m) => m.id === modelId);
+      if (!exists) {
+        await addCustomModel(model);
+        ui.warning(`Model "${modelId}" was not in the curated list. Added as a custom model for ${inferredProvider}.`);
+      }
+    } catch (error) {
+      // If write fails, continue setting model for current session anyway.
+      const errMsg = error instanceof Error ? error.message : String(error);
+      ui.warning(`Could not persist custom model metadata: ${errMsg}`);
+    }
   }
 
   try {
