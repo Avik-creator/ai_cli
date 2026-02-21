@@ -11,6 +11,7 @@ import { exportService } from "../services/planning/export.ts";
 import { sessionStorage } from "../services/storage/session-storage.ts";
 import { buildSystemPrompt, formatSpecForPrompt } from "./prompts.ts";
 import { displayToolCall, displaySeparator } from "./display.ts";
+import { isSlashCommand, executeSlashCommand, type SlashCommandContext } from "./slash-commands.ts";
 import type { ToolCall } from "./display.ts";
 import type { CoreMessage } from "ai";
 import fs from "fs";
@@ -372,7 +373,7 @@ Keep your response SHORT - acknowledge you're back and ask how they want to proc
   while (true) {
     const userInput = await text({
       message: chalk.blue("💬 You"),
-      placeholder: "Tell me what you want to build...",
+      placeholder: "Tell me what you want to build... (/help for commands)",
     });
 
     if (isCancel(userInput)) {
@@ -381,6 +382,42 @@ Keep your response SHORT - acknowledge you're back and ask how they want to proc
     }
 
     const input = (userInput as string).trim();
+
+    if (isSlashCommand(input)) {
+      const slashContext: SlashCommandContext = {
+        messages,
+        sessionId: currentSessionId,
+        mode: "plan",
+      };
+      const result = await executeSlashCommand(input, slashContext);
+      
+      if (result.output) {
+        console.log(result.output);
+      }
+      
+      if (result.clearMessages) {
+        messages.length = 1;
+        messages[0] = {
+          role: "system",
+          content: await buildSystemPrompt(),
+        };
+      }
+      
+      if (result.modelChanged) {
+        messages[0] = {
+          role: "system",
+          content: await buildSystemPrompt(),
+        };
+        console.log(chalk.gray(`\nReinitialized with new model: ${aiService.getModelId()}\n`));
+      }
+      
+      if (result.exit) {
+        console.log(chalk.yellow("\n👋 Goodbye! Session saved.\n"));
+        break;
+      }
+      
+      continue;
+    }
 
     if (input.toLowerCase() === "exit" || input.toLowerCase() === "quit") {
       console.log(chalk.yellow("\n👋 Goodbye! Session saved.\n"));

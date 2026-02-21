@@ -11,6 +11,7 @@ import type { ToolSet } from "../tools/index.ts";
 import { buildSystemPrompt } from "./prompts.ts";
 import { runPlanExecution } from "./plan-executor.ts";
 import { processMessage } from "./message-handler.ts";
+import { isSlashCommand, executeSlashCommand, type SlashCommandContext } from "./slash-commands.ts";
 
 interface RunAgentOptions {
   mode?: string;
@@ -75,7 +76,7 @@ export async function runAgent(options: RunAgentOptions = {}): Promise<void> {
       boxen(
         `${chalk.gray("Available tools:")}\n` +
         toolNames.map((t) => chalk.cyan(`  • ${t}`)).join("\n") +
-        `\n\n${chalk.gray('Type "help" for commands, "exit" to quit')}`,
+        `\n\n${chalk.gray('Type "help" for commands, "/help" for slash commands, "exit" to quit')}`,
         {
           padding: 1,
           borderStyle: "round",
@@ -135,7 +136,7 @@ export async function runAgent(options: RunAgentOptions = {}): Promise<void> {
   while (true) {
     const userInput = await text({
       message: chalk.blue("💬 You"),
-      placeholder: "Ask me anything...",
+      placeholder: "Ask me anything... (/help for commands)",
       validate: (val: string) => {
         if (!val || val.trim().length === 0) {
           return "Please enter a message";
@@ -154,6 +155,45 @@ export async function runAgent(options: RunAgentOptions = {}): Promise<void> {
     }
 
     const input = (userInput as string).trim();
+
+    if (isSlashCommand(input)) {
+      const slashContext: SlashCommandContext = {
+        messages,
+        sessionId: currentSessionId,
+        mode,
+      };
+      const result = await executeSlashCommand(input, slashContext);
+      
+      if (result.output) {
+        console.log(result.output);
+      }
+      
+      if (result.clearMessages) {
+        messages.length = 1;
+        messages[0] = {
+          role: "system",
+          content: await buildSystemPrompt(),
+        };
+      }
+      
+      if (result.modelChanged) {
+        const newModelId = aiService.getModelId();
+        messages[0] = {
+          role: "system",
+          content: await buildSystemPrompt(),
+        };
+      }
+      
+      if (result.exit) {
+        break;
+      }
+      
+      if (result.newSessionId) {
+        currentSessionId = result.newSessionId;
+      }
+      
+      continue;
+    }
 
     if (input.toLowerCase() === "exit" || input.toLowerCase() === "quit") {
       if (currentSessionId) {
@@ -193,6 +233,15 @@ function showHelp(): void {
       `${chalk.yellow("tools")}   - List available tools\n` +
       `${chalk.yellow("clear")}   - Clear conversation history\n` +
       `${chalk.yellow("exit")}    - Exit the agent\n\n` +
+      `${chalk.bold.cyan("Slash Commands:")}\n\n` +
+      `${chalk.cyan("/model")}   - Change AI model interactively\n` +
+      `${chalk.cyan("/provider")}- Change AI provider\n` +
+      `${chalk.cyan("/clear")}   - Clear conversation (same as clear)\n` +
+      `${chalk.cyan("/compact")} - Summarize and compact context\n` +
+      `${chalk.cyan("/sessions")}- List chat sessions\n` +
+      `${chalk.cyan("/config")}  - View/modify configuration\n` +
+      `${chalk.cyan("/info")}    - Show session info\n` +
+      `${chalk.cyan("/exit")}    - Exit the agent\n\n` +
       `${chalk.bold.cyan("Examples:")}\n\n` +
       `${chalk.gray('• "Search for React best practices"')}\n` +
       `${chalk.gray('• "Review PR https://github.com/owner/repo/pull/123"')}\n` +
