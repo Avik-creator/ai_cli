@@ -1,7 +1,7 @@
 import chalk from "chalk";
 import boxen from "boxen";
 import { select, isCancel, confirm, text, multiselect } from "@clack/prompts";
-import { config, AVAILABLE_MODELS, getModelsByProvider, getCurrentProvider, storeModel, setCurrentProvider } from "../config/env.ts";
+import { config, AVAILABLE_MODELS, getModelsByProvider, getCurrentProvider, setCurrentProvider } from "../config/env.ts";
 import { PROVIDERS, PROVIDER_MODELS, type Model } from "../config/providers.ts";
 import { getCustomModels } from "../config/custom-models.ts";
 import { aiService } from "../services/ai.service.ts";
@@ -80,6 +80,66 @@ function messageContentToText(content: CoreMessage["content"]): string {
     .trim();
 }
 
+async function resolveModelForProvider(providerId: string, currentModelId: string): Promise<string> {
+  const customModels = await getCustomModels();
+
+  if (providerId === "gateway") {
+    return currentModelId || AVAILABLE_MODELS[0]?.id || "openai/gpt-5-mini";
+  }
+
+  if (providerId === "openrouter") {
+    return currentModelId || PROVIDER_MODELS.openrouter?.[0]?.id || "openai/gpt-4o-mini";
+  }
+
+  const providerModels = PROVIDER_MODELS[providerId] || [];
+  const customForProvider = customModels.filter((m) => m.provider === providerId);
+
+  const modelSupported =
+    providerModels.some((m) => m.id === currentModelId) ||
+    customForProvider.some((m) => m.id === currentModelId);
+
+  if (modelSupported) {
+    return currentModelId;
+  }
+
+  return providerModels[0]?.id || customForProvider[0]?.id || currentModelId;
+}
+
+async function applyProviderChange(providerId: string): Promise<SlashCommandResult> {
+  const provider = PROVIDERS[providerId];
+  if (!provider) {
+    return {
+      handled: true,
+      output: chalk.red(`Unknown provider: ${providerId}`) +
+        chalk.gray(`\nAvailable: ${Object.keys(PROVIDERS).join(", ")}`),
+    };
+  }
+
+  await setCurrentProvider(providerId);
+
+  const nextModelId = await resolveModelForProvider(providerId, config.getModel());
+  await config.setModel(nextModelId);
+
+  try {
+    await aiService.setModel(nextModelId);
+    return {
+      handled: true,
+      modelChanged: true,
+      output: chalk.green(`✓ Provider changed to: ${chalk.white(provider.name)}`) +
+        chalk.gray(`\n  ${provider.description}`) +
+        chalk.gray(`\n  Model: ${chalk.white(nextModelId)}`),
+    };
+  } catch (error) {
+    const errMsg = error instanceof Error ? error.message : String(error);
+    return {
+      handled: true,
+      modelChanged: true,
+      output: chalk.yellow(`Provider set to ${provider.name}, but model initialization failed.`) +
+        chalk.gray(`\n  ${errMsg}`),
+    };
+  }
+}
+
 export async function executeSlashCommand(
   input: string,
   context: SlashCommandContext
@@ -137,8 +197,8 @@ registerSlashCommand({
     if (args) {
       const modelId = args.trim();
       try {
+        await config.setModel(modelId);
         await aiService.setModel(modelId);
-        await storeModel(modelId);
         return {
           handled: true,
           modelChanged: true,
@@ -213,8 +273,8 @@ registerSlashCommand({
     const selectedModelId = modelChoice as string;
     
     try {
+      await config.setModel(selectedModelId);
       await aiService.setModel(selectedModelId);
-      await storeModel(selectedModelId);
       return {
         handled: true,
         modelChanged: true,
@@ -233,23 +293,7 @@ registerSlashCommand({
   usage: "[provider-id]",
   execute: async (args) => {
     if (args) {
-      const providerId = args.trim().toLowerCase();
-      const provider = PROVIDERS[providerId];
-      
-      if (!provider) {
-        return {
-          handled: true,
-          output: chalk.red(`Unknown provider: ${providerId}`) + 
-            chalk.gray(`\nAvailable: ${Object.keys(PROVIDERS).join(", ")}`),
-        };
-      }
-
-      await setCurrentProvider(providerId);
-      return {
-        handled: true,
-        modelChanged: true,
-        output: chalk.green(`✓ Provider changed to: ${chalk.white(provider.name)}`),
-      };
+      return applyProviderChange(args.trim().toLowerCase());
     }
 
     const currentProviderId = await getCurrentProvider();
@@ -270,15 +314,7 @@ registerSlashCommand({
       return { handled: true, output: chalk.yellow("Provider selection cancelled") };
     }
 
-    const selectedProvider = PROVIDERS[providerChoice as string];
-    await setCurrentProvider(providerChoice as string);
-
-    return {
-      handled: true,
-      modelChanged: true,
-      output: chalk.green(`✓ Provider changed to: ${chalk.white(selectedProvider.name)}`) +
-        chalk.gray(`\n  ${selectedProvider.description}`),
-    };
+    return applyProviderChange(providerChoice as string);
   },
 });
 

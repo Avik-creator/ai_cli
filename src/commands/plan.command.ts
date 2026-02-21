@@ -8,7 +8,108 @@ import { verification } from "../services/planning/verification.js";
 import { exportService } from "../services/planning/export.js";
 import * as ui from "../utils/ui.ts";
 import { aiService } from "../services/ai.service.ts";
-import { generateText } from "ai";
+
+const PLAN_SPEC_TIMEOUT_MS = 90_000;
+
+function toStringArray(value: unknown): string[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  return value
+    .map((item) => (typeof item === "string" ? item.trim() : ""))
+    .filter((item) => item.length > 0);
+}
+
+function parseSpecDataFromText(text: string): Partial<SpecItem> {
+  const trimmed = text.trim();
+  if (!trimmed) {
+    throw new Error("Empty AI response");
+  }
+
+  try {
+    return JSON.parse(trimmed) as Partial<SpecItem>;
+  } catch {
+    const jsonMatch = trimmed.match(/\{[\s\S]*\}/);
+    if (!jsonMatch) {
+      throw new Error("Could not parse AI response");
+    }
+    return JSON.parse(jsonMatch[0]) as Partial<SpecItem>;
+  }
+}
+
+function pickFallbackTitle(prompt: string): string {
+  const firstMeaningfulLine = prompt
+    .split("\n")
+    .map((line) => line.trim())
+    .find((line) => line.length > 0 && !line.startsWith("#") && !line.startsWith("-"));
+
+  const candidate = firstMeaningfulLine || "Implementation Plan";
+  return candidate.length > 72 ? `${candidate.slice(0, 69)}...` : candidate;
+}
+
+function buildFallbackSpec(prompt: string): Partial<SpecItem> {
+  return {
+    title: pickFallbackTitle(prompt),
+    goal: prompt.trim(),
+    inScope: [
+      "Break work into small implementation tasks",
+      "Implement core requirements from the agreed direction",
+      "Add verification for completed behavior",
+    ],
+    outOfScope: [
+      "Unrelated refactors outside agreed scope",
+      "Optional enhancements not discussed in planning",
+    ],
+    acceptanceCriteria: [
+      "All required features from the agreed direction are implemented",
+      "Changes are validated with relevant checks/tests",
+      "Implementation summary maps changes back to requirements",
+    ],
+    fileBoundaries: ["src/**"],
+  };
+}
+
+function normalizeSpecData(data: Partial<SpecItem>, prompt: string): Partial<SpecItem> {
+  const title = typeof data.title === "string" && data.title.trim().length > 0
+    ? data.title.trim()
+    : pickFallbackTitle(prompt);
+
+  const goal = typeof data.goal === "string" && data.goal.trim().length > 0
+    ? data.goal.trim()
+    : prompt.trim();
+
+  const inScope = toStringArray(data.inScope);
+  const outOfScope = toStringArray(data.outOfScope);
+  const acceptanceCriteria = toStringArray(data.acceptanceCriteria);
+  const fileBoundaries = toStringArray(data.fileBoundaries);
+
+  return {
+    ...data,
+    title,
+    goal,
+    inScope: inScope.length > 0 ? inScope : buildFallbackSpec(prompt).inScope,
+    outOfScope,
+    acceptanceCriteria: acceptanceCriteria.length > 0
+      ? acceptanceCriteria
+      : buildFallbackSpec(prompt).acceptanceCriteria,
+    fileBoundaries: fileBoundaries.length > 0 ? fileBoundaries : ["src/**"],
+  };
+}
+
+async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, timeoutMessage: string): Promise<T> {
+  let timeoutId: ReturnType<typeof setTimeout> | null = null;
+  const timeoutPromise = new Promise<never>((_, reject) => {
+    timeoutId = setTimeout(() => reject(new Error(timeoutMessage)), timeoutMs);
+  });
+
+  try {
+    return await Promise.race([promise, timeoutPromise]);
+  } finally {
+    if (timeoutId) {
+      clearTimeout(timeoutId);
+    }
+  }
+}
 
 async function createSpecInteractive(): Promise<Partial<SpecItem> | null> {
   intro(chalk.bold.cyan("📋 Create New Plan"));
@@ -92,29 +193,30 @@ Respond ONLY with valid JSON, no other text.`;
 
   try {
     await aiService.initialize();
-    
-    const result = await aiService.generateText([
-      { role: "user", content: aiPrompt }
-    ]);
+    const result = await withTimeout(
+      aiService.generateText(
+        [{ role: "user", content: aiPrompt }],
+        undefined,
+        { temperature: 0.2, maxOutputTokens: 900 }
+      ),
+      PLAN_SPEC_TIMEOUT_MS,
+      "Timed out while generating plan spec. Try /compact or switch to a faster model."
+    );
 
-    const jsonMatch = result.text.match(/\{[\s\S]*\}/);
-    if (!jsonMatch) {
-      throw new Error("Could not parse AI response");
-    }
+    const parsed = parseSpecDataFromText(result.text);
+    const specData = normalizeSpecData(parsed, prompt);
 
-    const specData = JSON.parse(jsonMatch[0]);
-    
     console.log(chalk.green("\n✅ AI generated plan:\n"));
-    console.log(chalk.bold(specData.title));
-    console.log(chalk.gray(`Goal: ${specData.goal}\n`));
+    console.log(chalk.bold(specData.title || "Untitled Plan"));
+    console.log(chalk.gray(`Goal: ${specData.goal || prompt}\n`));
     console.log(chalk.cyan("In Scope:"));
-    specData.inScope?.forEach((item: string) => console.log(chalk.green(`  + ${item}`)));
-    if (specData.outOfScope?.length > 0) {
+    (specData.inScope || []).forEach((item: string) => console.log(chalk.green(`  + ${item}`)));
+    if ((specData.outOfScope || []).length > 0) {
       console.log(chalk.red("\nOut of Scope:"));
-      specData.outOfScope.forEach((item: string) => console.log(chalk.red(`  - ${item}`)));
+      (specData.outOfScope || []).forEach((item: string) => console.log(chalk.red(`  - ${item}`)));
     }
     console.log(chalk.cyan("\nAcceptance Criteria:"));
-    specData.acceptanceCriteria?.forEach((item: string, i: number) => console.log(chalk.gray(`  ${i + 1}. ${item}`)));
+    (specData.acceptanceCriteria || []).forEach((item: string, i: number) => console.log(chalk.gray(`  ${i + 1}. ${item}`)));
 
     const confirmCreate = await confirm({
       message: "Create this plan?",
@@ -129,8 +231,29 @@ Respond ONLY with valid JSON, no other text.`;
     return specData;
   } catch (error) {
     const errMsg = error instanceof Error ? error.message : String(error);
-    ui.error(`Failed to create plan: ${errMsg}`);
-    return null;
+    ui.warning(`AI plan generation failed: ${errMsg}`);
+    ui.warning("Using a local draft generated from your planning notes.");
+
+    const specData = buildFallbackSpec(prompt);
+    console.log(chalk.yellow("\n🧩 Draft plan (fallback):\n"));
+    console.log(chalk.bold(specData.title || "Implementation Plan"));
+    console.log(chalk.gray(`Goal: ${specData.goal || prompt}\n`));
+    console.log(chalk.cyan("In Scope:"));
+    (specData.inScope || []).forEach((item: string) => console.log(chalk.green(`  + ${item}`)));
+    console.log(chalk.cyan("\nAcceptance Criteria:"));
+    (specData.acceptanceCriteria || []).forEach((item: string, i: number) => console.log(chalk.gray(`  ${i + 1}. ${item}`)));
+
+    const confirmCreate = await confirm({
+      message: "Create this draft plan?",
+      initialValue: true,
+    });
+
+    if (!confirmCreate) {
+      outro(chalk.yellow("Plan creation cancelled"));
+      return null;
+    }
+
+    return specData;
   }
 }
 
@@ -573,6 +696,9 @@ export const planCommand = new Command("plan")
       .description("Execute a plan with confirmation before changes")
       .option("-a, --ai <prompt>", "Create and execute plan from AI prompt")
       .option("-i, --interactive", "Start interactive planning session")
+      .option("--strict", "Block on scope/critical drift after execution", true)
+      .option("--no-strict", "Warn on drift instead of blocking")
+      .option("--audit-ai", "Use AI-enhanced audit after execution")
       .argument("[id]", "Plan ID (uses active plan if not specified)")
       .action(async (id: string | undefined, options) => {
         const { runAgent } = await import("../agent/agent.js");
@@ -596,6 +722,8 @@ export const planCommand = new Command("plan")
             await runAgent({
               mode: "code",
               planId: spec.id,
+              planStrict: options.strict,
+              planAIAudit: !!options.auditAi,
             });
             return;
           }
@@ -617,6 +745,8 @@ export const planCommand = new Command("plan")
         await runAgent({
           mode: "code",
           planId: planId,
+          planStrict: options.strict,
+          planAIAudit: !!options.auditAi,
         });
       })
   )

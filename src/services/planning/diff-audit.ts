@@ -224,21 +224,30 @@ function calculateRiskScore(violations: ScopeViolation[], riskyPatterns: RiskyPa
     riskyPatterns,
   };
 
-  const severityWeights: Record<VerificationPriority, number> = {
-    critical: 10,
-    major: 5,
-    minor: 1,
-    outdated: 0,
-  };
-
   for (const v of violations) {
-    const weight = v.severity === "critical" ? 10 : v.severity === "major" ? 5 : 1;
-    score.total += weight;
+    if (v.severity === "critical") {
+      score.critical += 1;
+      score.total += 10;
+    } else if (v.severity === "major") {
+      score.major += 1;
+      score.total += 5;
+    } else if (v.severity === "minor") {
+      score.minor += 1;
+      score.total += 1;
+    }
   }
 
   for (const r of riskyPatterns) {
-    const weight = r.severity === "critical" ? 10 : r.severity === "major" ? 5 : 1;
-    score.total += weight;
+    if (r.severity === "critical") {
+      score.critical += 1;
+      score.total += 10;
+    } else if (r.severity === "major") {
+      score.major += 1;
+      score.total += 5;
+    } else if (r.severity === "minor") {
+      score.minor += 1;
+      score.total += 1;
+    }
   }
 
   return score;

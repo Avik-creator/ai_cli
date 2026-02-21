@@ -113,7 +113,7 @@ export async function processMessage(
     try {
       if (fs.existsSync(planPromptFile)) {
         const userRequest = fs.readFileSync(planPromptFile, "utf-8").trim();
-        fs.unlinkSync(planPromptFile);
+        fs.writeFileSync(".agentic-plan/plan-prompt.last.txt", userRequest, "utf-8");
         
         console.log(chalk.cyan("\n🤖 Creating plan and implementing...\n"));
         
@@ -121,6 +121,7 @@ export async function processMessage(
         const specData = await createSpecFromAI(userRequest);
         
         if (specData) {
+          fs.unlinkSync(planPromptFile);
           const spec = specStorage.createSpec(specData);
           console.log(chalk.green(`\n✓ Created plan: ${spec.title}\n`));
           
@@ -142,13 +143,17 @@ export async function processMessage(
           } else {
             console.log(chalk.yellow("\nPlan saved. Run 'agentic plan run' later to execute.\n"));
           }
+        } else {
+          fs.writeFileSync(".agentic-plan/plan-prompt.retry.txt", userRequest, "utf-8");
+          fs.unlinkSync(planPromptFile);
+          console.log(chalk.yellow("\nPlan generation did not complete. Saved prompt to .agentic-plan/plan-prompt.retry.txt\n"));
         }
         
         messages.length = 0;
       }
       else if (fs.existsSync(planReadyFile)) {
         const agreedApproach = fs.readFileSync(planReadyFile, "utf-8").trim();
-        fs.unlinkSync(planReadyFile);
+        fs.writeFileSync(".agentic-plan/plan-ready.last.txt", agreedApproach, "utf-8");
         
         console.log(chalk.cyan("\n🤖 Creating plan from our discussion...\n"));
         
@@ -156,6 +161,7 @@ export async function processMessage(
         const specData = await createSpecFromAI(agreedApproach);
         
         if (specData) {
+          fs.unlinkSync(planReadyFile);
           const spec = specStorage.createSpec(specData);
           console.log(chalk.green(`\n✓ Created plan: ${spec.title}\n`));
           
@@ -177,6 +183,10 @@ export async function processMessage(
           } else {
             console.log(chalk.yellow("\nPlan saved. Run 'agentic plan run' later to execute.\n"));
           }
+        } else {
+          fs.writeFileSync(".agentic-plan/plan-ready.retry.txt", agreedApproach, "utf-8");
+          fs.unlinkSync(planReadyFile);
+          console.log(chalk.yellow("\nPlan generation did not complete. Saved discussion to .agentic-plan/plan-ready.retry.txt\n"));
         }
         
         messages.length = 0;

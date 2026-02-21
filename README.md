@@ -383,6 +383,15 @@ agentic plan verify --ai
 # Execute a plan (asks for confirmation before changes)
 agentic plan run <plan-id>
 
+# Execute with strict drift blocking (default)
+agentic plan run <plan-id> --strict
+
+# Execute with warnings only (no block)
+agentic plan run <plan-id> --no-strict
+
+# Use AI-enhanced audit after execution
+agentic plan run <plan-id> --audit-ai
+
 # Execute active plan
 agentic plan run
 
@@ -544,7 +553,7 @@ agentic ask "Help me..." --mode all
 | `agentic plan activate <id>` | Activate a plan for verification | - |
 | `agentic plan verify [id]` | Verify changes against a plan | `--ai` - Use AI for deeper verification |
 | `agentic plan status` | Check current plan status | - |
-| `agentic plan run [id]` | Execute a plan with confirmation | `-a, --ai <prompt>` - Create and execute from prompt<br>`-i, --interactive` - Start interactive planning session |
+| `agentic plan run [id]` | Execute a controlled plan workflow | `-a, --ai <prompt>` - Create and execute from prompt<br>`-i, --interactive` - Start interactive planning session<br>`--strict / --no-strict` - Block or warn on drift<br>`--audit-ai` - AI-enhanced post-diff audit |
 | `agentic plan phase add <id>` | Add a phase to a plan | - |
 | `agentic plan export markdown <id>` | Export plan as Markdown | `-o, --output <path>` - Output file path |
 | `agentic plan export json <id>` | Export plan as JSON | `-o, --output <path>` - Output file path |

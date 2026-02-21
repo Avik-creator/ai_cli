@@ -1,6 +1,7 @@
 import { streamText, generateObject, generateText, stepCountIs, type CoreMessage, type LanguageModel } from "ai";
 import { config, AVAILABLE_MODELS } from "../config/env.ts";
 import { PROVIDERS, PROVIDER_MODELS, type Provider } from "../config/providers.ts";
+import { getCustomModels } from "../config/custom-models.ts";
 import type { ToolSet } from "../tools/index.ts";
 import chalk from "chalk";
 import { spawn, type ChildProcess } from "child_process";
@@ -13,6 +14,7 @@ interface SendMessageOptions {
   maxSteps?: number;
   temperature?: number;
   maxTokens?: number;
+  maxOutputTokens?: number;
   [key: string]: unknown;
 }
 
@@ -28,6 +30,8 @@ interface SendMessageResult {
   toolResults: unknown[];
   steps?: unknown[];
 }
+
+const OPENROUTER_SAFE_MAX_TOKENS = 1024;
 
 function collectErrorSignals(error: unknown, depth: number = 0): { messages: string[]; statusCode?: number } {
   if (!error || depth > 3) {
@@ -74,6 +78,16 @@ function collectErrorSignals(error: unknown, depth: number = 0): { messages: str
     }
   }
 
+  if (Array.isArray(anyError.errors)) {
+    for (const nestedError of anyError.errors) {
+      const nested = collectErrorSignals(nestedError, depth + 1);
+      messages.push(...nested.messages);
+      if (nested.statusCode !== undefined) {
+        statusCode = nested.statusCode;
+      }
+    }
+  }
+
   return { messages, statusCode };
 }
 
@@ -93,8 +107,36 @@ function toUserFacingAIError(error: unknown): Error {
     );
   }
 
+  if (
+    signalText.includes("prompt tokens limit exceeded") ||
+    signalText.includes("prompt is too long")
+  ) {
+    return new Error(
+      "Prompt exceeds provider token limits. Use /compact, /clear, or start a new planning session."
+    );
+  }
+
   if (signalText.includes("rate limit") || signalText.includes("too many requests")) {
     return new Error("Provider rate limit reached. Please wait a few seconds and try again.");
+  }
+
+  if (
+    statusCode === 429 ||
+    signalText.includes("temporarily rate-limited upstream") ||
+    signalText.includes("provider returned error")
+  ) {
+    return new Error("Provider is temporarily rate-limited. Please retry shortly or switch models with /model.");
+  }
+
+  if (
+    statusCode === 402 ||
+    signalText.includes("requires more credits") ||
+    signalText.includes("can only afford") ||
+    signalText.includes("openrouter.ai/settings/credits")
+  ) {
+    return new Error(
+      "Insufficient OpenRouter credits for this request. Add credits or reduce response size (try /compact or lower max tokens)."
+    );
   }
 
   if (
@@ -172,6 +214,39 @@ export class AIService {
   private modelId: string | null = null;
   private providerId: string | null = null;
   private providerInstance: ((modelId: string) => LanguageModel) | null = null;
+
+  private resolveEffectiveMaxTokens(maxTokensOverride?: number, maxOutputTokensOverride?: number): number | undefined {
+    if (typeof maxOutputTokensOverride === "number") {
+      return maxOutputTokensOverride;
+    }
+
+    if (typeof maxTokensOverride === "number") {
+      return maxTokensOverride;
+    }
+
+    if (this.providerId === "openrouter") {
+      return Math.min(config.maxTokens, OPENROUTER_SAFE_MAX_TOKENS);
+    }
+
+    return config.maxTokens;
+  }
+
+  private resolveRequestOutputTokenOptions(options: SendMessageOptions): { maxTokens?: number; maxOutputTokens?: number } {
+    const resolved = this.resolveEffectiveMaxTokens(
+      options.maxTokens as number | undefined,
+      options.maxOutputTokens as number | undefined
+    );
+
+    if (typeof resolved !== "number") {
+      return {};
+    }
+
+    // Keep both keys for compatibility across AI SDK/provider adapters.
+    return {
+      maxTokens: resolved,
+      maxOutputTokens: resolved,
+    };
+  }
 
   async initialize(modelId: string | null = null): Promise<void> {
     // Get current provider
@@ -257,27 +332,39 @@ export class AIService {
     // Use provided model or default
     const selectedModel = modelId || config.getModel();
 
-    // For gateway, validate against AVAILABLE_MODELS
-    // For other providers, validate against PROVIDER_MODELS
-    let modelExists = false;
-    if (provider.id === "gateway") {
-      modelExists = AVAILABLE_MODELS.some((m) => m.id === selectedModel);
-    } else {
-      const providerModels = PROVIDER_MODELS[currentProviderId] || [];
-      modelExists = providerModels.some((m) => m.id === selectedModel);
-    }
+    const customModels = await getCustomModels();
 
-    if (!modelExists && selectedModel) {
-      // Silently use default model - don't warn about unknown models
-      // Use first model from provider as default
+    // OpenRouter supports a very large dynamic model catalog.
+    // Do not override user-selected model IDs with a curated fallback.
+    if (provider.id === "openrouter" && selectedModel) {
+      this.modelId = selectedModel;
+    } else {
+      // For gateway, validate against AVAILABLE_MODELS + custom models
+      // For other providers, validate against PROVIDER_MODELS + provider-scoped custom models
+      let modelExists = false;
       if (provider.id === "gateway") {
-        this.modelId = config.getModel();
+        modelExists =
+          AVAILABLE_MODELS.some((m) => m.id === selectedModel) ||
+          customModels.some((m) => m.id === selectedModel);
       } else {
         const providerModels = PROVIDER_MODELS[currentProviderId] || [];
-        this.modelId = providerModels[0]?.id || selectedModel;
+        modelExists =
+          providerModels.some((m) => m.id === selectedModel) ||
+          customModels.some((m) => m.id === selectedModel && m.provider === currentProviderId);
       }
-    } else {
-      this.modelId = selectedModel;
+
+      if (!modelExists && selectedModel) {
+      // Silently use default model - don't warn about unknown models
+      // Use first model from provider as default
+        if (provider.id === "gateway") {
+          this.modelId = config.getModel();
+        } else {
+          const providerModels = PROVIDER_MODELS[currentProviderId] || [];
+          this.modelId = providerModels[0]?.id || selectedModel;
+        }
+      } else {
+        this.modelId = selectedModel;
+      }
     }
 
     // Create model instance
@@ -308,12 +395,15 @@ export class AIService {
     await this.initialize(options.modelId || null);
 
     try {
+      const { modelId: _modelId, maxSteps: _maxSteps, temperature: overrideTemperature, maxTokens: _maxTokens, maxOutputTokens: _maxOutputTokens, ...passthroughOptions } = options;
+      const tokenOptions = this.resolveRequestOutputTokenOptions(options);
+
       const streamConfig: Record<string, unknown> = {
         model: this.model,
         messages: messages,
-        temperature: config.temperature,
-        maxTokens: config.maxTokens,
-        ...options,
+        ...passthroughOptions,
+        temperature: typeof overrideTemperature === "number" ? overrideTemperature : config.temperature,
+        ...tokenOptions,
       };
 
       // Add tools if provided with maxSteps for multi-step tool calling
@@ -398,12 +488,15 @@ export class AIService {
   ) {
     await this.initialize(options.modelId || null);
 
+    const { modelId: _modelId, maxSteps: _maxSteps, temperature: overrideTemperature, maxTokens: _maxTokens, maxOutputTokens: _maxOutputTokens, ...passthroughOptions } = options;
+    const tokenOptions = this.resolveRequestOutputTokenOptions(options);
+
     const textConfig: Record<string, unknown> = {
       model: this.model,
       messages,
-      temperature: config.temperature,
-      maxTokens: config.maxTokens,
-      ...options,
+      ...passthroughOptions,
+      temperature: typeof overrideTemperature === "number" ? overrideTemperature : config.temperature,
+      ...tokenOptions,
     };
 
     if (tools && Object.keys(tools).length > 0) {
@@ -431,11 +524,15 @@ export class AIService {
     await this.initialize(options.modelId || null);
 
     try {
+      const { modelId: _modelId, maxSteps: _maxSteps, temperature: _temperature, maxTokens: _maxTokens, maxOutputTokens: _maxOutputTokens, ...passthroughOptions } = options;
+      const tokenOptions = this.resolveRequestOutputTokenOptions(options);
+
       const result = await generateObject({
         model: this.model!,
         schema: schema,
         prompt: prompt,
-        ...options,
+        ...passthroughOptions,
+        ...tokenOptions,
       });
 
       return result.object as z.infer<T>;

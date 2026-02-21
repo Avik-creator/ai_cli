@@ -20,6 +20,8 @@ interface RunAgentOptions {
   switchModel?: boolean;
   modelId?: string;
   planId?: string | null;
+  planStrict?: boolean;
+  planAIAudit?: boolean;
 }
 
 function renderResumedHistory(messages: CoreMessage[]): void {
@@ -66,7 +68,10 @@ export async function runAgent(options: RunAgentOptions = {}): Promise<void> {
   const { mode = "all", singlePrompt = null, planId = null } = options;
 
   if (planId) {
-    await runPlanExecution(planId);
+    await runPlanExecution(planId, {
+      strict: options.planStrict,
+      aiAudit: options.planAIAudit,
+    });
     return;
   }
 
@@ -202,6 +207,11 @@ export async function runAgent(options: RunAgentOptions = {}): Promise<void> {
           role: "system",
           content: await buildSystemPrompt(),
         };
+        try {
+          await aiService.initialize();
+        } catch {
+          // Initialization errors are already returned by slash commands.
+        }
       }
       
       if (result.exit) {

@@ -8,14 +8,18 @@ import { aiService } from "../services/ai.service.ts";
 import { getToolsForTask } from "../tools/index.ts";
 import { specStorage } from "../services/planning/spec-storage.ts";
 import { exportService } from "../services/planning/export.ts";
+import { verification } from "../services/planning/verification.ts";
+import { diffAudit } from "../services/planning/diff-audit.ts";
 import { sessionStorage } from "../services/storage/session-storage.ts";
 import { buildSystemPrompt, formatSpecForPrompt } from "./prompts.ts";
 import { displayToolCall, displaySeparator, displayWarning } from "./display.ts";
 import { isSlashCommand, executeSlashCommand, type SlashCommandContext } from "./slash-commands.ts";
 import type { ToolCall } from "./display.ts";
 import type { CoreMessage } from "ai";
+import type { SpecItem } from "../services/planning/spec-storage.ts";
 import { getPlanningProgress } from "./planning-state.ts";
 import fs from "fs";
+import { execFileSync } from "child_process";
 
 marked.use(
   markedTerminal({
@@ -35,6 +39,7 @@ marked.use(
 
 const PLAN_DIR = ".agentic-plan";
 const PLAN_QUICK_COMMANDS = "help | status | recap | /plan-status | /plan-recap | exit";
+const DEFAULT_STRICT_GUARDRAILS = true;
 const COLLABORATIVE_PLANNING_GUIDE = `You are in planning mode and acting as a collaborative engineering partner.
 
 Use this interaction contract on EVERY planning response:
@@ -160,6 +165,54 @@ function getFriendlyPlanningError(error: unknown): string {
   return message;
 }
 
+function messageContentToText(content: CoreMessage["content"]): string {
+  if (typeof content === "string") {
+    return content;
+  }
+
+  if (!Array.isArray(content)) {
+    return "";
+  }
+
+  return content
+    .map((part) => {
+      if (typeof part === "string") {
+        return part;
+      }
+      if (part && typeof part === "object" && "text" in part && typeof part.text === "string") {
+        return part.text;
+      }
+      return "";
+    })
+    .join(" ")
+    .trim();
+}
+
+function isCreatePlanIntent(input: string): boolean {
+  const normalized = input.trim().toLowerCase();
+  return [
+    "create plan",
+    "create the plan",
+    "finalize plan",
+    "finalize the plan",
+    "lets do it",
+    "let's do it",
+    "go ahead",
+    "confirm plan",
+  ].includes(normalized);
+}
+
+function buildAgreementFromMessages(messages: CoreMessage[]): string {
+  const relevant = messages
+    .filter((message) => message.role === "user" || message.role === "assistant")
+    .slice(-14)
+    .map((message) => `${message.role.toUpperCase()}: ${messageContentToText(message.content)}`)
+    .join("\n\n");
+
+  const compact = relevant.length > 4500 ? relevant.slice(relevant.length - 4500) : relevant;
+  return `Planning agreement summary:\n\n${compact}`;
+}
+
 async function generateArchitectureDiagram(spec: any): Promise<void> {
   const diagramContent = `# ${spec.title} - Architecture
 
@@ -186,21 +239,182 @@ Generated: ${new Date().toISOString()}
   console.log(chalk.cyan(`📐 Architecture diagram saved to: ${diagramPath}`));
 }
 
-export async function runPlanExecution(specId: string): Promise<boolean> {
+async function createAndOfferPlanFromAgreement(
+  sessionId: string,
+  agreedApproach: string
+): Promise<"continue" | "done"> {
+  sessionStorage.updatePlanningSession(sessionId, agreedApproach);
+  fs.writeFileSync(`${PLAN_DIR}/plan-ready.last.txt`, agreedApproach, "utf-8");
+
+  console.log(chalk.cyan("\n🤖 Creating implementation plan...\n"));
+
+  const { createSpecFromAI } = await import("../commands/plan.command.js");
+  const specData = await createSpecFromAI(agreedApproach);
+
+  if (!specData) {
+    fs.writeFileSync(`${PLAN_DIR}/plan-ready.retry.txt`, agreedApproach, "utf-8");
+    displayWarning(
+      "Plan generation did not complete. Your latest discussion was saved to .agentic-plan/plan-ready.retry.txt",
+      "Plan Not Created"
+    );
+    return "continue";
+  }
+
+  const spec = specStorage.createSpec(specData);
+  console.log(chalk.green(`\n✅ Created plan: ${spec.title}\n`));
+
+  sessionStorage.updatePlanningSession(sessionId, undefined, spec.id, "completed");
+
+  console.log(chalk.cyan("📝 Generating tickets...\n"));
+  try {
+    exportService.exportTickets(spec.id, "tasks", undefined);
+    console.log(chalk.green("✓ Tickets generated\n"));
+  } catch (e) {
+    console.log(chalk.yellow("⚠️ Could not generate tickets\n"));
+  }
+
+  console.log(chalk.cyan("📐 Creating architecture diagram...\n"));
+  try {
+    await generateArchitectureDiagram(spec);
+    console.log(chalk.green("✓ Architecture diagram created\n"));
+  } catch (e) {
+    console.log(chalk.yellow("⚠️ Could not create architecture diagram\n"));
+  }
+
+  console.log(
+    boxen(
+      chalk.bold.cyan("Plan Summary\n\n") +
+      formatSpecForPrompt(spec),
+      {
+        padding: 1,
+        borderStyle: "round",
+        borderColor: "cyan",
+      }
+    )
+  );
+
+  const execute = await confirm({
+    message: "Ready for me to implement this?",
+    initialValue: true,
+  });
+
+  if (execute) {
+    await runPlanExecution(spec.id);
+  } else {
+    console.log(chalk.yellow("\nPlan saved. Run 'agentic plan run' later to execute.\n"));
+    console.log(chalk.dim("Session ended. Your discussion is saved.\n"));
+  }
+
+  return "done";
+}
+
+interface PlanExecutionOptions {
+  strict?: boolean;
+  aiAudit?: boolean;
+  autoCommit?: boolean;
+}
+
+function getSpecContractGaps(spec: SpecItem): string[] {
+  const gaps: string[] = [];
+  if (!spec.goal || spec.goal.trim().length === 0) {
+    gaps.push("Goal is empty");
+  }
+  if (spec.inScope.length === 0) {
+    gaps.push("In-scope items are empty");
+  }
+  if (spec.acceptanceCriteria.length === 0) {
+    gaps.push("Acceptance criteria are empty");
+  }
+  if (spec.fileBoundaries.length === 0) {
+    gaps.push("File boundaries are empty");
+  }
+  return gaps;
+}
+
+function getDriftSummary(result: Awaited<ReturnType<typeof verification.verifyCurrentChanges>>): {
+  hasScopeViolation: boolean;
+  hasCritical: boolean;
+  hasMajor: boolean;
+} {
+  const hasScopeViolation = result.risk.scopeViolations.length > 0;
+  const hasCriticalIssue = result.issues.some((issue) => issue.priority === "critical");
+  const hasMajorIssue = result.issues.some((issue) => issue.priority === "major");
+  const hasCriticalRisk = result.risk.critical > 0;
+  const hasMajorRisk = result.risk.major > 0;
+
+  return {
+    hasScopeViolation,
+    hasCritical: hasCriticalIssue || hasCriticalRisk,
+    hasMajor: hasMajorIssue || hasMajorRisk,
+  };
+}
+
+async function maybeCommitChanges(spec: SpecItem, autoCommit: boolean): Promise<boolean> {
+  const hasChanges = diffAudit.hasUncommittedChanges();
+  if (!hasChanges) {
+    console.log(chalk.gray("No uncommitted changes to commit.\n"));
+    return true;
+  }
+
+  let shouldCommit = autoCommit;
+  if (!autoCommit) {
+    const commitConfirm = await confirm({
+      message: "Audit complete. Create a git commit now?",
+      initialValue: false,
+    });
+    shouldCommit = !isCancel(commitConfirm) && Boolean(commitConfirm);
+  }
+
+  if (!shouldCommit) {
+    console.log(chalk.yellow("Changes kept uncommitted. Review and commit when ready.\n"));
+    return true;
+  }
+
+  const defaultMessage = `plan(${spec.id}): ${spec.title}`;
+  const commitMessage = await text({
+    message: "Commit message:",
+    initialValue: defaultMessage,
+    placeholder: defaultMessage,
+  });
+
+  if (isCancel(commitMessage) || !String(commitMessage).trim()) {
+    console.log(chalk.yellow("Commit cancelled. Changes remain in working tree.\n"));
+    return true;
+  }
+
+  try {
+    execFileSync("git", ["add", "-A"], { stdio: "inherit" });
+    execFileSync("git", ["commit", "-m", String(commitMessage).trim()], { stdio: "inherit" });
+    console.log(chalk.green("\n✅ Commit created successfully.\n"));
+    return true;
+  } catch (error) {
+    const errMsg = error instanceof Error ? error.message : String(error);
+    displayWarning(`Failed to create commit: ${errMsg}`, "Commit Failed");
+    return false;
+  }
+}
+
+export async function runPlanExecution(specId: string, options: PlanExecutionOptions = {}): Promise<boolean> {
   const spec = specStorage.getSpec(specId);
   if (!spec) {
     console.log(chalk.red(`Plan not found: ${specId}`));
     return false;
   }
 
+  const strictGuardrails = options.strict ?? DEFAULT_STRICT_GUARDRAILS;
+  const aiAudit = options.aiAudit ?? false;
+  const autoCommit = options.autoCommit ?? false;
+
   console.log(
     boxen(
-      chalk.bold.cyan("📋 Plan Execution Mode\n\n") +
-      chalk.gray("You are about to execute a plan. The AI will:\n") +
-      chalk.white("1. Analyze the codebase\n") +
-      chalk.white("2. Generate implementation steps\n") +
-      chalk.white("3. Ask for confirmation BEFORE making changes\n") +
-      chalk.white("4. Execute only after you approve"),
+      chalk.bold.cyan("📋 Controlled Plan Execution\n\n") +
+      chalk.gray("Workflow:\n") +
+      chalk.white("1. Validate spec contract\n") +
+      chalk.white("2. Propose implementation steps\n") +
+      chalk.white("3. Confirm before writing code\n") +
+      chalk.white("4. Execute and capture git diff\n") +
+      chalk.white("5. Audit diff vs spec\n") +
+      chalk.white("6. Confirm commit"),
       {
         padding: 1,
         margin: { top: 1, bottom: 1 },
@@ -209,6 +423,9 @@ export async function runPlanExecution(specId: string): Promise<boolean> {
       }
     )
   );
+
+  console.log(chalk.gray(`Guardrail mode: ${strictGuardrails ? chalk.green("STRICT") : chalk.yellow("WARN")}`));
+  console.log(chalk.gray(`Audit engine: ${aiAudit ? chalk.cyan("AI + local") : chalk.cyan("local")}\n`));
 
   console.log(
     boxen(
@@ -223,40 +440,24 @@ export async function runPlanExecution(specId: string): Promise<boolean> {
     )
   );
 
+  const contractGaps = getSpecContractGaps(spec);
+  if (contractGaps.length > 0) {
+    displayWarning(`Spec contract gaps:\n- ${contractGaps.join("\n- ")}`, "Spec Contract Incomplete");
+    const proceedWithGaps = await confirm({
+      message: strictGuardrails
+        ? "Spec is incomplete. Continue anyway (strict guardrails still apply)?"
+        : "Spec is incomplete. Continue in warning mode?",
+      initialValue: false,
+    });
+    if (isCancel(proceedWithGaps) || !proceedWithGaps) {
+      console.log(chalk.yellow("\nExecution cancelled. Refine the plan first.\n"));
+      return false;
+    }
+  }
+
   await aiService.initialize();
 
   const systemPrompt = await buildSystemPrompt();
-  
-  const prompt = `You are executing a plan. Your task is to:
-
-1. First, explore the codebase to understand the current structure
-2. Generate a detailed implementation plan based on the spec below
-3. Present the implementation steps clearly
-4. WAIT for user confirmation before making ANY changes
-
-## SPEC:
-${formatSpecForPrompt(spec)}
-
-## Your Response Format:
-Start by exploring the codebase, then present:
-
-### Implementation Steps
-1. [Step description]
-2. [Step description]
-...
-
-### Files to Modify
-- file1.ts
-- file2.ts
-...
-
-### Files to Create
-- new-file.ts
-...
-
-Then ask: "Should I start implementing these changes? (yes/no)"
-
-DO NOT make any changes until the user explicitly confirms.`;
 
   const spin = yoctoSpinner({ text: "Analyzing codebase and generating plan...", color: "cyan" }).start();
 
@@ -269,10 +470,13 @@ DO NOT make any changes until the user explicitly confirms.`;
 ## Current Task
 You are executing a plan. Your task is to:
 
-1. First, explore the codebase to understand the current structure
-2. Generate a detailed implementation plan based on the spec below
-3. Present the implementation steps clearly
-4. WAIT for user confirmation before making ANY changes
+1. First, explore the codebase to understand the current structure.
+2. Generate a detailed implementation plan based on the spec below.
+3. Respect scope constraints:
+   - Stay within file boundaries unless explicitly approved.
+   - Avoid out-of-scope files/items.
+   - Anchor work to acceptance criteria.
+4. WAIT for user confirmation before making ANY changes.
 
 ## SPEC:
 ${formatSpecForPrompt(spec)}
@@ -294,9 +498,13 @@ Start by exploring the codebase, then present:
 - new-file.ts
 ...
 
-Then ask: "Should I start implementing these changes? (yes/no)"
+### Scope Check
+- Explain why each touched file is within scope.
 
-DO NOT make any changes until the user explicitly confirms.`;
+Then ask: "Should I start implementing these changes? (yes/no)".
+
+DO NOT make any changes until the user explicitly confirms.
+If the plan cannot be completed inside scope, ask for scope update instead of proceeding.`;
 
   try {
     await aiService.sendMessage(
@@ -338,7 +546,7 @@ DO NOT make any changes until the user explicitly confirms.`;
     initialValue: false,
   });
 
-  if (!shouldImplement) {
+  if (isCancel(shouldImplement) || !shouldImplement) {
     console.log(chalk.yellow("\n👌 Implementation cancelled. Your code is safe.\n"));
     return false;
   }
@@ -349,12 +557,21 @@ DO NOT make any changes until the user explicitly confirms.`;
 
 For each file:
 1. Read the existing file first
-2. Make the necessary modifications
-3. Explain what you changed
+2. Confirm the file is in scope before modifying
+3. Make the necessary modifications
+4. Explain what you changed and which acceptance criterion it satisfies
 
 Start implementing now.`;
 
   let implResponse = "";
+  const codeTools = getToolsForTask("code");
+  const executionTools = {
+    readFile: codeTools.readFile,
+    writeFile: codeTools.writeFile,
+    listDir: codeTools.listDir,
+    searchFiles: codeTools.searchFiles,
+    executeCommand: codeTools.executeCommand,
+  };
 
   try {
     await aiService.sendMessage(
@@ -379,11 +596,11 @@ Start implementing now.`;
         }
         implResponse += chunk;
       },
-      getToolsForTask("code"),
+      executionTools,
       (toolCall: unknown) => {
         displayToolCall(toolCall as ToolCall);
       },
-      { maxSteps: 15 }
+      { maxSteps: 18 }
     );
   } catch (error) {
     displayWarning(getFriendlyPlanningError(error), "Implementation Failed");
@@ -396,8 +613,47 @@ Start implementing now.`;
   }
 
   displaySeparator();
-  console.log(chalk.green.bold("\n✅ Implementation complete!\n"));
+  console.log(chalk.green.bold("\n✅ Implementation complete. Running spec audit...\n"));
 
+  const auditResult = await verification.verifyCurrentChanges(spec, aiAudit);
+  verification.printVerificationResult(auditResult);
+
+  const drift = getDriftSummary(auditResult);
+  const changedFiles = auditResult.files.length;
+
+  if (changedFiles === 0) {
+    displayWarning("No code changes were detected after execution.", "No Diff");
+    return false;
+  }
+
+  if (strictGuardrails && (drift.hasScopeViolation || drift.hasCritical)) {
+    displayWarning(
+      "Strict guardrails blocked completion due to scope/critical drift.\n" +
+      "Review the diff, adjust spec boundaries, or rerun with --no-strict.",
+      "Execution Blocked"
+    );
+
+    const override = await confirm({
+      message: "Override strict block and keep these changes anyway?",
+      initialValue: false,
+    });
+
+    if (isCancel(override) || !override) {
+      console.log(chalk.yellow("\nExecution stopped after audit block. Working tree changes remain for your review.\n"));
+      return false;
+    }
+  } else if (drift.hasScopeViolation || drift.hasCritical || drift.hasMajor) {
+    console.log(chalk.yellow("⚠️  Drift/risk signals detected. Proceeding in warning mode.\n"));
+  } else {
+    console.log(chalk.green("✅ Audit passed: changes align with declared scope.\n"));
+  }
+
+  const commitOk = await maybeCommitChanges(spec, autoCommit);
+  if (!commitOk) {
+    return false;
+  }
+
+  console.log(chalk.green.bold("✅ Plan workflow complete: Spec → Execute → Audit → Confirm.\n"));
   return true;
 }
 
@@ -565,7 +821,13 @@ export async function runInteractivePlanning(): Promise<void> {
           role: "system",
           content: await buildPlanningSystemPrompt(messages.length > 1),
         };
-        console.log(chalk.gray(`\nReinitialized with new model: ${aiService.getModelId()}\n`));
+        try {
+          await aiService.initialize();
+          console.log(chalk.gray(`\nReinitialized with new model: ${aiService.getModelId()}\n`));
+        } catch (e) {
+          const errMsg = e instanceof Error ? e.message : String(e);
+          displayWarning(errMsg, "Model Initialization Failed");
+        }
       }
       
       if (result.exit) {
@@ -581,11 +843,24 @@ export async function runInteractivePlanning(): Promise<void> {
       break;
     }
 
+    if (isCreatePlanIntent(input)) {
+      messages.push({ role: "user", content: input });
+      sessionStorage.addPlanningMessage(currentSessionId!, "user", input);
+
+      const agreedApproach = buildAgreementFromMessages(messages);
+      const outcome = await createAndOfferPlanFromAgreement(currentSessionId!, agreedApproach);
+      if (outcome === "done") {
+        return;
+      }
+      continue;
+    }
+
     messages.push({ role: "user", content: input });
     sessionStorage.addPlanningMessage(currentSessionId!, "user", input);
 
     let fullResponse = "";
     const spin = yoctoSpinner({ text: "Thinking...", color: "cyan" }).start();
+    const planningTools = { writeFile: getToolsForTask("code").writeFile };
 
     try {
       await aiService.sendMessage(
@@ -610,7 +885,7 @@ export async function runInteractivePlanning(): Promise<void> {
           }
           fullResponse += chunk;
         },
-        getToolsForTask("all"),
+        planningTools,
         (toolCall: unknown) => {
           displayToolCall(toolCall as ToolCall);
         },
@@ -641,61 +916,9 @@ export async function runInteractivePlanning(): Promise<void> {
     if (fs.existsSync(planReadyFile)) {
       const agreedApproach = fs.readFileSync(planReadyFile, "utf-8").trim();
       fs.unlinkSync(planReadyFile);
-
-      sessionStorage.updatePlanningSession(currentSessionId!, agreedApproach);
-
-      console.log(chalk.cyan("\n🤖 Creating implementation plan...\n"));
-
-      const { createSpecFromAI } = await import("../commands/plan.command.js");
-      const specData = await createSpecFromAI(agreedApproach);
-
-      if (specData) {
-        const spec = specStorage.createSpec(specData);
-        console.log(chalk.green(`\n✅ Created plan: ${spec.title}\n`));
-
-        sessionStorage.updatePlanningSession(currentSessionId!, undefined, spec.id, "completed");
-
-        console.log(chalk.cyan("📝 Generating tickets...\n"));
-        try {
-          exportService.exportTickets(spec.id, "tasks", undefined);
-          console.log(chalk.green("✓ Tickets generated\n"));
-        } catch (e) {
-          console.log(chalk.yellow("⚠️ Could not generate tickets\n"));
-        }
-
-        console.log(chalk.cyan("📐 Creating architecture diagram...\n"));
-        try {
-          await generateArchitectureDiagram(spec);
-          console.log(chalk.green("✓ Architecture diagram created\n"));
-        } catch (e) {
-          console.log(chalk.yellow("⚠️ Could not create architecture diagram\n"));
-        }
-
-        console.log(
-          boxen(
-            chalk.bold.cyan("Plan Summary\n\n") +
-            formatSpecForPrompt(spec),
-            {
-              padding: 1,
-              borderStyle: "round",
-              borderColor: "cyan",
-            }
-          )
-        );
-
-        const execute = await confirm({
-          message: "Ready for me to implement this?",
-          initialValue: true,
-        });
-
-        if (execute) {
-          await runPlanExecution(spec.id);
-          return;
-        } else {
-          console.log(chalk.yellow("\nPlan saved. Run 'agentic plan run' later to execute.\n"));
-          console.log(chalk.dim("Session ended. Your discussion is saved.\n"));
-          break;
-        }
+      const outcome = await createAndOfferPlanFromAgreement(currentSessionId!, agreedApproach);
+      if (outcome === "done") {
+        return;
       }
     }
   }

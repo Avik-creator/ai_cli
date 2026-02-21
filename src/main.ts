@@ -26,20 +26,57 @@ function formatTopLevelError(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
+function shouldSuppressTopLevelError(message: string): boolean {
+  const normalized = message.toLowerCase();
+  return (
+    normalized.includes("no output generated. check the stream for errors") ||
+    normalized.includes("ai_apicallerror") ||
+    normalized.includes("ai_retryerror") ||
+    normalized.includes("vercel.ai.error") ||
+    normalized.includes("provider returned error") ||
+    normalized.includes("prompt tokens limit exceeded") ||
+    normalized.includes("request too large for model")
+  );
+}
+
 process.on("unhandledRejection", (reason: unknown) => {
-  console.error(chalk.red("\n❌ Error:"), formatTopLevelError(reason));
+  const message = formatTopLevelError(reason);
+  if (shouldSuppressTopLevelError(message)) {
+    return;
+  }
+  console.error(chalk.red("\n❌ Error:"), message);
   if (process.env.AGENTIC_VERBOSE_ERRORS === "1") {
     console.error(reason);
   }
 });
 
 process.on("uncaughtException", (error: Error) => {
-  console.error(chalk.red("\n❌ Error:"), formatTopLevelError(error));
+  const message = formatTopLevelError(error);
+  if (shouldSuppressTopLevelError(message)) {
+    return;
+  }
+  console.error(chalk.red("\n❌ Error:"), message);
   if (process.env.AGENTIC_VERBOSE_ERRORS === "1") {
     console.error(error.stack);
   }
   process.exit(1);
 });
+
+if (typeof globalThis.addEventListener === "function") {
+  globalThis.addEventListener("unhandledrejection", (event: Event) => {
+    const reason = (event as unknown as { reason?: unknown }).reason;
+    const message = formatTopLevelError(reason);
+    if (!shouldSuppressTopLevelError(message)) {
+      console.error(chalk.red("\n❌ Error:"), message);
+      if (process.env.AGENTIC_VERBOSE_ERRORS === "1") {
+        console.error(reason);
+      }
+    }
+    if ("preventDefault" in event && typeof event.preventDefault === "function") {
+      event.preventDefault();
+    }
+  });
+}
 
 async function main(): Promise<void> {
   const program = new Command("agentic");
@@ -80,7 +117,11 @@ async function main(): Promise<void> {
 }
 
 main().catch((error: unknown) => {
-  console.error(chalk.red("\n❌ Error:"), formatTopLevelError(error));
+  const message = formatTopLevelError(error);
+  if (shouldSuppressTopLevelError(message)) {
+    return;
+  }
+  console.error(chalk.red("\n❌ Error:"), message);
   if (process.env.AGENTIC_VERBOSE_ERRORS === "1") {
     console.error(error instanceof Error ? error.stack : error);
   }

@@ -1,7 +1,7 @@
 import chalk from "chalk";
 import boxen from "boxen";
 import { select, isCancel, intro, outro, confirm, text } from "@clack/prompts";
-import { AVAILABLE_MODELS, getModelsByProvider, config, getCurrentProvider, storeModel } from "../../config/env.ts";
+import { AVAILABLE_MODELS, getModelsByProvider, config, getCurrentProvider } from "../../config/env.ts";
 import { getCustomModels, addCustomModel, removeCustomModel } from "../../config/custom-models.ts";
 import { PROVIDERS, PROVIDER_MODELS, type Model } from "../../config/providers.ts";
 import { aiService } from "../../services/ai.service.ts";
@@ -202,8 +202,8 @@ export async function setAction(modelId: string | undefined): Promise<void> {
   }
 
   try {
+    await config.setModel(modelId);
     await aiService.setModel(modelId);
-    await storeModel(modelId);
     const provider = PROVIDERS[currentProviderId];
 
     ui.successBox(`Model set to: ${modelId}`, {

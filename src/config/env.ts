@@ -290,6 +290,7 @@ export async function getCurrentProvider(): Promise<string> {
  * Set current provider
  */
 export async function setCurrentProvider(providerId: string): Promise<void> {
+  process.env.AGENTICAI_PROVIDER = providerId;
   await storeApiKey("AGENTICAI_PROVIDER", providerId);
   // Also update .env file
   await updateEnvFile("AGENTICAI_PROVIDER", providerId);
@@ -309,6 +310,7 @@ export async function getProviderApiKey(providerId: string): Promise<string | un
  * Store model ID to .env file
  */
 export async function storeModel(modelId: string): Promise<void> {
+  process.env.AGENTICAI_MODEL = modelId;
   const envPath = join(process.cwd(), ".env");
   let envContent = "";
   try {
@@ -401,4 +403,3 @@ export { KEYS_FILE };
 export function getConfigDir(): string {
   return apiKeyStore.getFilePath().substring(0, apiKeyStore.getFilePath().lastIndexOf("/"));
 }
-
