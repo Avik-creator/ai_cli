@@ -19,6 +19,7 @@ import type { SpecItem } from "../services/planning/spec-storage.ts";
 import { getPlanningProgress } from "./planning-state.ts";
 import fs from "fs";
 import { execFileSync } from "child_process";
+import { randomUUID } from "crypto";
 
 marked.use(
   markedTerminal({
@@ -741,6 +742,7 @@ export async function runInteractivePlanning(): Promise<void> {
   let currentSessionId: string | null = null;
   let isNewSession = false;
   let resumedSessionLastActivity: string | null = null;
+  let resumedSessionStatus: string | null = null;
 
   if (sessions.length > 0) {
     const options = [
@@ -748,9 +750,9 @@ export async function runInteractivePlanning(): Promise<void> {
         value: "new",
         label: `${chalk.bold.cyan("Start new planning session")} ${chalk.gray("(fresh collaboration)")}`,
       },
-      ...sessions.filter(s => s.status === "active").map(s => ({
+      ...sessions.map((s) => ({
         value: s.id,
-        label: `${chalk.white("Resume")} ${chalk.cyan(s.id.slice(0, 8))}... ${chalk.gray(new Date(s.lastActivity).toLocaleString())}`,
+        label: `${chalk.white("Resume")} ${chalk.cyan(s.id.slice(0, 8))}... ${chalk.gray(new Date(s.lastActivity).toLocaleString())} ${chalk.gray(`[${s.status}]`)}`,
       })),
     ];
 
@@ -764,14 +766,21 @@ export async function runInteractivePlanning(): Promise<void> {
       isNewSession = true;
     } else {
       currentSessionId = choice as string;
-      resumedSessionLastActivity = sessions.find((session) => session.id === currentSessionId)?.lastActivity ?? null;
+      const selectedSession = sessions.find((session) => session.id === currentSessionId) || null;
+      resumedSessionLastActivity = selectedSession?.lastActivity ?? null;
+      resumedSessionStatus = selectedSession?.status ?? null;
+
+      // Reopen completed/archived planning sessions when user resumes them.
+      if (resumedSessionStatus && resumedSessionStatus !== "active") {
+        sessionStorage.updatePlanningSession(currentSessionId, undefined, undefined, "active");
+      }
     }
   } else {
     isNewSession = true;
   }
 
   if (isNewSession) {
-    currentSessionId = Date.now().toString(36);
+    currentSessionId = randomUUID().split("-")[0];
     sessionStorage.createPlanningSession(currentSessionId);
   }
 
@@ -801,6 +810,9 @@ export async function runInteractivePlanning(): Promise<void> {
         chalk.gray("Continuing from your previous collaboration.\n") +
         (resumedSessionLastActivity
           ? `${chalk.gray(`Last activity: ${new Date(resumedSessionLastActivity).toLocaleString()}\n`)}`
+          : "") +
+        (resumedSessionStatus && resumedSessionStatus !== "active"
+          ? `${chalk.yellow(`Status changed: ${resumedSessionStatus} → active\n`)}`
           : "") +
         chalk.white(`Quick commands: ${PLAN_QUICK_COMMANDS}`),
         {
