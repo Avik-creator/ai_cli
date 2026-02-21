@@ -7,7 +7,6 @@ import { confirm, text, isCancel, select } from "@clack/prompts";
 import { aiService } from "../services/ai.service.ts";
 import { getToolsForTask } from "../tools/index.ts";
 import { specStorage } from "../services/planning/spec-storage.ts";
-import { exportService } from "../services/planning/export.ts";
 import { verification } from "../services/planning/verification.ts";
 import { diffAudit } from "../services/planning/diff-audit.ts";
 import { sessionStorage } from "../services/storage/session-storage.ts";
@@ -40,6 +39,20 @@ marked.use(
 const PLAN_DIR = ".agentic-plan";
 const PLAN_QUICK_COMMANDS = "help | status | recap | /plan-status | /plan-recap | exit";
 const DEFAULT_STRICT_GUARDRAILS = true;
+const PLANNING_CONTROL_INPUTS = new Set([
+  "create plan",
+  "status",
+  "recap",
+  "help",
+  "exit",
+  "/plan-status",
+  "/plan-recap",
+  "/plan-sttus",
+]);
+const ANSI_ESCAPE_RE = /\u001b\[[0-9;]*m/g;
+const TRANSCRIPT_PREFIX_RE = /^\s*(USER|ASSISTANT|SYSTEM|TOOL)\s*:/i;
+const BOX_DRAWING_LINE_RE = /^[\s│┌┐└┘╭╮╰╯─━┃┊┈▏▕◇◆•·]+$/;
+const PLANNING_NOISE_RE = /^(quick commands:|commands:|next:|analyzing:|plan created!|planning agreement summary:?)/i;
 const COLLABORATIVE_PLANNING_GUIDE = `You are in planning mode and acting as a collaborative engineering partner.
 
 Use this interaction contract on EVERY planning response:
@@ -202,41 +215,116 @@ function isCreatePlanIntent(input: string): boolean {
   ].includes(normalized);
 }
 
-function buildAgreementFromMessages(messages: CoreMessage[]): string {
-  const relevant = messages
-    .filter((message) => message.role === "user" || message.role === "assistant")
-    .slice(-14)
-    .map((message) => `${message.role.toUpperCase()}: ${messageContentToText(message.content)}`)
-    .join("\n\n");
+function isLikelyCodeLine(line: string): boolean {
+  const trimmed = line.trim();
+  const lower = trimmed.toLowerCase();
+  if (!trimmed) {
+    return false;
+  }
 
-  const compact = relevant.length > 4500 ? relevant.slice(relevant.length - 4500) : relevant;
-  return `Planning agreement summary:\n\n${compact}`;
+  if (["bash", "python", "json", "yaml", "yml", "env", "toml", "sql", "typescript", "javascript"].includes(lower)) {
+    return true;
+  }
+  if (/^[A-Z0-9_]{2,}\s*=/.test(trimmed)) {
+    return true;
+  }
+  if (/^(pip|npm|pnpm|yarn|bun|uvicorn|python3?|node|go|cargo)\b/i.test(trimmed)) {
+    return true;
+  }
+  if (/^(from\s+\S+\s+import|import\s+\S+)/i.test(trimmed)) {
+    return true;
+  }
+  if (/^[a-z_][a-z0-9_\.]*\(.*/i.test(trimmed)) {
+    return true;
+  }
+  if (/^[a-z_][a-z0-9_]*\s*=.+/i.test(trimmed)) {
+    return true;
+  }
+  if (/^(class|def|async def|return|await|if|else|elif|for|while|try|except|raise)\b/i.test(trimmed)) {
+    return true;
+  }
+  if (trimmed.startsWith("#")) {
+    return true;
+  }
+  if (trimmed.includes("```")) {
+    return true;
+  }
+  if (/^[(){}[\],.:]+$/.test(trimmed)) {
+    return true;
+  }
+  if (/^@[\w.]+/.test(trimmed)) {
+    return true;
+  }
+  if (trimmed.includes("├──") || trimmed.includes("└──")) {
+    return true;
+  }
+  if (trimmed.includes("Column(") || trimmed.includes("ForeignKey(") || trimmed.includes("__tablename__")) {
+    return true;
+  }
+  if (/[{}();]{3,}/.test(trimmed)) {
+    return true;
+  }
+  return false;
 }
 
-async function generateArchitectureDiagram(spec: any): Promise<void> {
-  const diagramContent = `# ${spec.title} - Architecture
+function sanitizeAgreementText(raw: string): string {
+  return raw
+    .replace(/\r/g, "")
+    .replace(ANSI_ESCAPE_RE, "")
+    .replace(/```[\s\S]*?```/g, " ")
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0)
+    .filter((line) => !TRANSCRIPT_PREFIX_RE.test(line))
+    .filter((line) => !BOX_DRAWING_LINE_RE.test(line))
+    .filter((line) => !PLANNING_NOISE_RE.test(line))
+    .filter((line) => !line.startsWith("~"))
+    .filter((line) => !line.includes("To continue this session later"))
+    .filter((line) => !line.startsWith("┌"))
+    .filter((line) => !line.startsWith("╭"))
+    .filter((line) => !line.startsWith("│"))
+    .filter((line) => !isLikelyCodeLine(line))
+    .join(" ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
 
-## System Overview
-${spec.goal}
+function isPlanningControlInput(input: string): boolean {
+  const normalized = input.trim().toLowerCase();
+  if (normalized.length === 0) {
+    return true;
+  }
+  if (normalized.startsWith("/")) {
+    return true;
+  }
+  if (PLANNING_CONTROL_INPUTS.has(normalized)) {
+    return true;
+  }
+  if (/^create plan\b/.test(normalized)) {
+    return true;
+  }
+  return false;
+}
 
-## Components
+function buildAgreementFromMessages(messages: CoreMessage[]): string {
+  const snippets = messages
+    .filter((message) => message.role === "user")
+    .map((message) => sanitizeAgreementText(messageContentToText(message.content)))
+    .filter((text) => text.length > 0)
+    .filter((text) => !isPlanningControlInput(text));
 
-${spec.inScope.map((item: string) => `- ${item}`).join("\n")}
+  const deduped: string[] = [];
+  for (const snippet of snippets.slice(-20)) {
+    if (deduped[deduped.length - 1] !== snippet) {
+      deduped.push(snippet);
+    }
+  }
 
-## Data Flow
-(TODO: Add flow diagram)
+  const combined = deduped.join("\n\n");
+  const compact = combined.length > 2400 ? combined.slice(combined.length - 2400) : combined;
+  const fallback = "No explicit agreement captured. Use the most recent confirmed scope and constraints.";
 
-## Tech Stack
-- Language: To be determined
-- Framework: To be determined
-
----
-Generated: ${new Date().toISOString()}
-`;
-
-  const diagramPath = `${PLAN_DIR}/${spec.id}-architecture.md`;
-  fs.writeFileSync(diagramPath, diagramContent, "utf-8");
-  console.log(chalk.cyan(`📐 Architecture diagram saved to: ${diagramPath}`));
+  return `Planning agreement summary:\n\n${compact || fallback}`;
 }
 
 async function createAndOfferPlanFromAgreement(
@@ -265,21 +353,10 @@ async function createAndOfferPlanFromAgreement(
 
   sessionStorage.updatePlanningSession(sessionId, undefined, spec.id, "completed");
 
-  console.log(chalk.cyan("📝 Generating tickets...\n"));
-  try {
-    exportService.exportTickets(spec.id, "tasks", undefined);
-    console.log(chalk.green("✓ Tickets generated\n"));
-  } catch (e) {
-    console.log(chalk.yellow("⚠️ Could not generate tickets\n"));
-  }
-
-  console.log(chalk.cyan("📐 Creating architecture diagram...\n"));
-  try {
-    await generateArchitectureDiagram(spec);
-    console.log(chalk.green("✓ Architecture diagram created\n"));
-  } catch (e) {
-    console.log(chalk.yellow("⚠️ Could not create architecture diagram\n"));
-  }
+  console.log(chalk.cyan("🧩 Plan artifacts (.md) saved in .agentic-plan/\n"));
+  console.log(chalk.gray(`  • .agentic-plan/${spec.id}.md`));
+  console.log(chalk.gray(`  • .agentic-plan/${spec.id}-tickets.md`));
+  console.log(chalk.gray(`  • .agentic-plan/${spec.id}-architecture.md\n`));
 
   console.log(
     boxen(

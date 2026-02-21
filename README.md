@@ -408,6 +408,11 @@ agentic plan phase add <plan-id>
 agentic plan delete <plan-id>
 ```
 
+When a plan is created, artifacts are written to `.agentic-plan/` as Markdown:
+- `<plan-id>.md` (plan)
+- `<plan-id>-tickets.md` (task tickets)
+- `<plan-id>-architecture.md` (architecture diagram)
+
 **Export Plans:**
 
 ```bash

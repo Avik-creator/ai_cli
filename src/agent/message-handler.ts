@@ -8,7 +8,6 @@ import type { ToolSet } from "../tools/index.ts";
 import { aiService } from "../services/ai.service.ts";
 import { sessionManager } from "../services/session-manager.ts";
 import { specStorage } from "../services/planning/spec-storage.js";
-import { exportService } from "../services/planning/export.js";
 import { displayToolCall, displayToolResult, displaySeparator } from "./display.ts";
 import type { ToolCall, ToolResult } from "./display.ts";
 import { createPanel } from "../utils/tui.ts";
@@ -124,14 +123,10 @@ export async function processMessage(
           fs.unlinkSync(planPromptFile);
           const spec = specStorage.createSpec(specData);
           console.log(chalk.green(`\n✓ Created plan: ${spec.title}\n`));
-          
-          console.log(chalk.cyan("📝 Generating tickets...\n"));
-          try {
-            exportService.exportTickets(spec.id, "tasks", undefined);
-            console.log(chalk.green("✓ Tickets generated\n"));
-          } catch (e) {
-            console.log(chalk.yellow("⚠️  Could not generate tickets\n"));
-          }
+          console.log(chalk.cyan("🧩 Plan artifacts (.md) saved in .agentic-plan/\n"));
+          console.log(chalk.gray(`  • .agentic-plan/${spec.id}.md`));
+          console.log(chalk.gray(`  • .agentic-plan/${spec.id}-tickets.md`));
+          console.log(chalk.gray(`  • .agentic-plan/${spec.id}-architecture.md\n`));
           
           const execute = await confirm({
             message: "Execute this plan? (Will make changes to your codebase)",
@@ -164,14 +159,10 @@ export async function processMessage(
           fs.unlinkSync(planReadyFile);
           const spec = specStorage.createSpec(specData);
           console.log(chalk.green(`\n✓ Created plan: ${spec.title}\n`));
-          
-          console.log(chalk.cyan("📝 Generating tickets...\n"));
-          try {
-            exportService.exportTickets(spec.id, "tasks", undefined);
-            console.log(chalk.green("✓ Tickets generated\n"));
-          } catch (e) {
-            console.log(chalk.yellow("⚠️  Could not generate tickets\n"));
-          }
+          console.log(chalk.cyan("🧩 Plan artifacts (.md) saved in .agentic-plan/\n"));
+          console.log(chalk.gray(`  • .agentic-plan/${spec.id}.md`));
+          console.log(chalk.gray(`  • .agentic-plan/${spec.id}-tickets.md`));
+          console.log(chalk.gray(`  • .agentic-plan/${spec.id}-architecture.md\n`));
           
           const execute = await confirm({
             message: "Execute this plan? (Will make changes to your codebase)",

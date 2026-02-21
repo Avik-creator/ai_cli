@@ -125,8 +125,7 @@ export const specStorage = {
 
     const filename = join(getSpecDir(), `${id}.json`);
     saveSpec(spec, filename);
-
-    exportService.exportTickets(id, "tasks");
+    exportService.exportArtifacts(id);
 
     return spec;
   },

@@ -10,6 +10,129 @@ import * as ui from "../utils/ui.ts";
 import { aiService } from "../services/ai.service.ts";
 
 const PLAN_SPEC_TIMEOUT_MS = 90_000;
+const TRANSCRIPT_PREFIX_RE = /^\s*(USER|ASSISTANT|SYSTEM|TOOL)\s*:/i;
+const CONTROL_LINE_RE = /^\s*(create plan|status|recap|help|exit|\/[a-z0-9-]+)\s*$/i;
+const BOX_DRAWING_LINE_RE = /^[\s│┌┐└┘╭╮╰╯─━┃┊┈▏▕◇◆•·]+$/;
+const SECTION_NOISE_RE = /^(quick commands:|commands:|next:|analyzing:|plan created!|planning agreement summary:?)/i;
+const ANSI_ESCAPE_RE = /\u001b\[[0-9;]*m/g;
+
+function isLikelyCodeLine(line: string): boolean {
+  const trimmed = line.trim();
+  const lower = trimmed.toLowerCase();
+  if (!trimmed) {
+    return false;
+  }
+
+  if (["bash", "python", "json", "yaml", "yml", "env", "toml", "sql", "typescript", "javascript"].includes(lower)) {
+    return true;
+  }
+  if (/^[A-Z0-9_]{2,}\s*=/.test(trimmed)) {
+    return true;
+  }
+  if (/^(pip|npm|pnpm|yarn|bun|uvicorn|python3?|node|go|cargo)\b/i.test(trimmed)) {
+    return true;
+  }
+  if (/^(from\s+\S+\s+import|import\s+\S+)/i.test(trimmed)) {
+    return true;
+  }
+  if (/^[a-z_][a-z0-9_\.]*\(.*/i.test(trimmed)) {
+    return true;
+  }
+  if (/^[a-z_][a-z0-9_]*\s*=.+/i.test(trimmed)) {
+    return true;
+  }
+  if (/^(class|def|async def|return|await|if|else|elif|for|while|try|except|raise)\b/i.test(trimmed)) {
+    return true;
+  }
+  if (trimmed.startsWith("#")) {
+    return true;
+  }
+  if (trimmed.includes("```")) {
+    return true;
+  }
+  if (/^[(){}[\],.:]+$/.test(trimmed)) {
+    return true;
+  }
+  if (/^@[\w.]+/.test(trimmed)) {
+    return true;
+  }
+  if (trimmed.includes("├──") || trimmed.includes("└──")) {
+    return true;
+  }
+  if (trimmed.includes("Column(") || trimmed.includes("ForeignKey(") || trimmed.includes("__tablename__")) {
+    return true;
+  }
+  if (/[{}();]{3,}/.test(trimmed)) {
+    return true;
+  }
+  return false;
+}
+
+function sanitizePlanningText(raw: string): string {
+  const cleaned = raw
+    .replace(/\r/g, "")
+    .replace(ANSI_ESCAPE_RE, "")
+    .replace(/```[\s\S]*?```/g, " ");
+
+  const lines = cleaned
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0)
+    .filter((line) => !TRANSCRIPT_PREFIX_RE.test(line))
+    .filter((line) => !CONTROL_LINE_RE.test(line))
+    .filter((line) => !BOX_DRAWING_LINE_RE.test(line))
+    .filter((line) => !SECTION_NOISE_RE.test(line))
+    .filter((line) => !line.includes("To continue this session later"))
+    .filter((line) => !line.startsWith("~"))
+    .filter((line) => !line.startsWith("┌"))
+    .filter((line) => !line.startsWith("╭"))
+    .filter((line) => !line.startsWith("│"))
+    .filter((line) => !isLikelyCodeLine(line));
+
+  return lines.join("\n").replace(/\n{3,}/g, "\n\n").trim();
+}
+
+function sanitizeSingleLine(raw: string): string {
+  return sanitizePlanningText(raw).replace(/\n+/g, " ").trim();
+}
+
+function clipText(value: string, maxChars: number): string {
+  if (value.length <= maxChars) {
+    return value;
+  }
+  return `${value.slice(0, Math.max(0, maxChars - 3)).trim()}...`;
+}
+
+function sanitizeList(values: string[], fallback: string[] = []): string[] {
+  const normalized = values
+    .map((value) => sanitizeSingleLine(value))
+    .filter((value) => value.length > 0)
+    .filter((value) => !CONTROL_LINE_RE.test(value))
+    .filter((value) => !SECTION_NOISE_RE.test(value))
+    .map((value) => clipText(value, 180));
+
+  const unique = Array.from(new Set(normalized));
+  if (unique.length > 0) {
+    return unique.slice(0, 12);
+  }
+
+  return fallback;
+}
+
+function summarizeGoal(prompt: string): string {
+  const cleaned = sanitizePlanningText(prompt);
+  if (!cleaned) {
+    return "Implement the agreed scope with verification and clear file boundaries.";
+  }
+
+  const lines = cleaned
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0);
+
+  const summary = lines.slice(0, 6).join(" ");
+  return clipText(summary || lines[0], 420);
+}
 
 function toStringArray(value: unknown): string[] {
   if (!Array.isArray(value)) {
@@ -38,61 +161,70 @@ function parseSpecDataFromText(text: string): Partial<SpecItem> {
 }
 
 function pickFallbackTitle(prompt: string): string {
-  const firstMeaningfulLine = prompt
+  const cleaned = sanitizePlanningText(prompt);
+  const firstMeaningfulLine = cleaned
     .split("\n")
     .map((line) => line.trim())
     .find((line) => line.length > 0 && !line.startsWith("#") && !line.startsWith("-"));
 
-  const candidate = firstMeaningfulLine || "Implementation Plan";
-  return candidate.length > 72 ? `${candidate.slice(0, 69)}...` : candidate;
+  const candidate = sanitizeSingleLine(firstMeaningfulLine || "Implementation Plan");
+  return clipText(candidate || "Implementation Plan", 72);
 }
 
 function buildFallbackSpec(prompt: string): Partial<SpecItem> {
+  const defaultInScope = [
+    "Break work into small implementation tasks",
+    "Implement core requirements from the agreed direction",
+    "Add verification for completed behavior",
+  ];
+  const defaultAcceptanceCriteria = [
+    "All required features from the agreed direction are implemented",
+    "Changes are validated with relevant checks/tests",
+    "Implementation summary maps changes back to requirements",
+  ];
+
   return {
     title: pickFallbackTitle(prompt),
-    goal: prompt.trim(),
-    inScope: [
-      "Break work into small implementation tasks",
-      "Implement core requirements from the agreed direction",
-      "Add verification for completed behavior",
-    ],
+    goal: summarizeGoal(prompt),
+    inScope: defaultInScope,
     outOfScope: [
       "Unrelated refactors outside agreed scope",
       "Optional enhancements not discussed in planning",
     ],
-    acceptanceCriteria: [
-      "All required features from the agreed direction are implemented",
-      "Changes are validated with relevant checks/tests",
-      "Implementation summary maps changes back to requirements",
-    ],
+    acceptanceCriteria: defaultAcceptanceCriteria,
     fileBoundaries: ["src/**"],
   };
 }
 
 function normalizeSpecData(data: Partial<SpecItem>, prompt: string): Partial<SpecItem> {
-  const title = typeof data.title === "string" && data.title.trim().length > 0
-    ? data.title.trim()
+  const fallback = buildFallbackSpec(prompt);
+  const fallbackInScope = fallback.inScope || [];
+  const fallbackAcceptanceCriteria = fallback.acceptanceCriteria || [];
+
+  const titleRaw = typeof data.title === "string" ? data.title : "";
+  const title = titleRaw.trim().length > 0
+    ? clipText(sanitizeSingleLine(titleRaw), 72)
     : pickFallbackTitle(prompt);
 
-  const goal = typeof data.goal === "string" && data.goal.trim().length > 0
-    ? data.goal.trim()
-    : prompt.trim();
+  const goalRaw = typeof data.goal === "string" ? data.goal : "";
+  const cleanedGoal = goalRaw.trim().length > 0
+    ? clipText(sanitizePlanningText(goalRaw), 1200)
+    : summarizeGoal(prompt);
+  const goal = cleanedGoal.length > 0 ? cleanedGoal : summarizeGoal(prompt);
 
-  const inScope = toStringArray(data.inScope);
-  const outOfScope = toStringArray(data.outOfScope);
-  const acceptanceCriteria = toStringArray(data.acceptanceCriteria);
-  const fileBoundaries = toStringArray(data.fileBoundaries);
+  const inScope = sanitizeList(toStringArray(data.inScope), fallbackInScope);
+  const outOfScope = sanitizeList(toStringArray(data.outOfScope));
+  const acceptanceCriteria = sanitizeList(toStringArray(data.acceptanceCriteria), fallbackAcceptanceCriteria);
+  const fileBoundaries = sanitizeList(toStringArray(data.fileBoundaries), ["src/**"]);
 
   return {
     ...data,
     title,
     goal,
-    inScope: inScope.length > 0 ? inScope : buildFallbackSpec(prompt).inScope,
+    inScope,
     outOfScope,
-    acceptanceCriteria: acceptanceCriteria.length > 0
-      ? acceptanceCriteria
-      : buildFallbackSpec(prompt).acceptanceCriteria,
-    fileBoundaries: fileBoundaries.length > 0 ? fileBoundaries : ["src/**"],
+    acceptanceCriteria,
+    fileBoundaries,
   };
 }
 
