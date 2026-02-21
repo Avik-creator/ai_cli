@@ -146,15 +146,31 @@ class SessionManager {
       return "No sessions found.";
     }
     
-    const lines: string[] = [];
-    for (const session of sessions) {
+    const rows = sessions.map((session) => {
       const dateStr = formatDate(session.updatedAt);
       const title = session.title || "Untitled";
       const mode = session.mode || "all";
       const count = session.messageCount;
-      lines.push(`${session.id.slice(0, 8)}... | ${title} (${mode}) | ${count} msgs | ${dateStr}`);
-    }
-    return lines.join("\n");
+      return {
+        id: `${session.id.slice(0, 8)}...`,
+        title,
+        mode,
+        count: `${count} msgs`,
+        date: dateStr,
+      };
+    });
+
+    const idWidth = Math.max(...rows.map((row) => row.id.length), 0) + 2;
+    const titleWidth = Math.min(Math.max(...rows.map((row) => row.title.length), 12), 34) + 2;
+    const modeWidth = Math.max(...rows.map((row) => row.mode.length), 0) + 2;
+    const countWidth = Math.max(...rows.map((row) => row.count.length), 0) + 2;
+
+    return rows
+      .map((row, index) => {
+        const clippedTitle = row.title.length > titleWidth - 2 ? `${row.title.slice(0, titleWidth - 5)}...` : row.title;
+        return `${String(index + 1).padStart(2, "0")}. ${row.id.padEnd(idWidth)}${clippedTitle.padEnd(titleWidth)}${row.mode.padEnd(modeWidth)}${row.count.padEnd(countWidth)}${row.date}`;
+      })
+      .join("\n");
   }
 }
 

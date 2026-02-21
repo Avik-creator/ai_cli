@@ -7,6 +7,8 @@ import { getCustomModels } from "../config/custom-models.ts";
 import { aiService } from "../services/ai.service.ts";
 import { sessionManager } from "../services/session-manager.ts";
 import { PERSONALITIES } from "../services/storage/user-preferences.js";
+import { getPlanningProgress } from "./planning-state.ts";
+import { createPanel, formatCommandRows, formatList } from "../utils/tui.ts";
 import type { CoreMessage } from "ai";
 
 export interface SlashCommand {
@@ -53,6 +55,31 @@ export function isSlashCommand(input: string): boolean {
   return input.trim().startsWith("/");
 }
 
+function messageContentToText(content: CoreMessage["content"]): string {
+  if (typeof content === "string") {
+    return content;
+  }
+
+  if (!Array.isArray(content)) {
+    return "";
+  }
+
+  return content
+    .map((part) => {
+      if (typeof part === "string") {
+        return part;
+      }
+
+      if (part && typeof part === "object" && "text" in part && typeof part.text === "string") {
+        return part.text;
+      }
+
+      return "";
+    })
+    .join(" ")
+    .trim();
+}
+
 export async function executeSlashCommand(
   input: string,
   context: SlashCommandContext
@@ -82,19 +109,19 @@ registerSlashCommand({
   execute: async () => {
     const commandList = slashCommands
       .map((cmd) => {
-        const aliases = cmd.aliases ? chalk.gray(` (${cmd.aliases.map(a => `/${a}`).join(", ")})`) : "";
-        const usage = cmd.usage ? chalk.gray(` ${cmd.usage}`) : "";
-        return `  ${chalk.cyan(`/${cmd.name}`)}${aliases.padEnd(20)} - ${chalk.white(cmd.description)}${usage}`;
-      })
-      .join("\n");
+        const aliases = cmd.aliases?.length ? ` (${cmd.aliases.map((alias) => `/${alias}`).join(", ")})` : "";
+        const usage = cmd.usage ? ` ${cmd.usage}` : "";
+        return {
+          command: `/${cmd.name}${aliases}${usage}`,
+          description: cmd.description,
+        };
+      });
 
-    const output = boxen(
-      `${chalk.bold.cyan("Slash Commands")}\n\n${commandList}\n\n` +
-      chalk.gray("Usage: /<command> [arguments]"),
+    const output = createPanel(
+      "Slash Commands",
+      `${formatCommandRows(commandList)}\n\n${chalk.gray("Usage: /<command> [arguments]")}`,
       {
-        padding: 1,
-        borderStyle: "round",
-        borderColor: "cyan",
+        tone: "primary",
       }
     );
 
@@ -355,6 +382,127 @@ registerSlashCommand({
 });
 
 registerSlashCommand({
+  name: "plan-status",
+  description: "Show collaboration progress for planning mode",
+  aliases: ["pstatus"],
+  execute: async (_, context) => {
+    if (context.mode !== "plan") {
+      return {
+        handled: true,
+        output: chalk.yellow("This command is only available in plan mode."),
+      };
+    }
+
+    const progress = getPlanningProgress(context.messages);
+    const activeStageIndex = progress.stages.findIndex((stage) => stage.id === progress.currentStage.id);
+    const progressBar = progress.stages
+      .map((_, index) => {
+        if (index < activeStageIndex) return chalk.green("■");
+        if (index === activeStageIndex) return chalk.cyan("▣");
+        return chalk.gray("□");
+      })
+      .join(" ");
+
+    const stages = progress.stages
+      .map((stage) => {
+        if (stage.id === progress.currentStage.id) {
+          return `  ${chalk.cyan("➜")} ${chalk.cyan(stage.label)}`;
+        }
+        if (stage.complete) {
+          return `  ${chalk.green("✓")} ${chalk.green(stage.label)}`;
+        }
+        return `  ${chalk.gray("•")} ${chalk.gray(stage.label)}`;
+      })
+      .join("\n");
+
+    return {
+      handled: true,
+      output: boxen(
+        `${chalk.bold.cyan("Progress")} ${progressBar} ${chalk.gray(`(${progress.completedCount}/${progress.totalStages} complete)`)}\n` +
+        `${chalk.bold.cyan("Turns")} ${chalk.white(`${progress.userTurns} user / ${progress.assistantTurns} assistant`)}\n\n` +
+        `${stages}\n\n` +
+        `${chalk.yellow("Next")} ${progress.nextStepHint}`,
+        {
+          padding: 1,
+          borderStyle: "round",
+          borderColor: "cyan",
+          title: "🤝 Plan Status",
+        }
+      ),
+    };
+  },
+});
+
+registerSlashCommand({
+  name: "plan-recap",
+  description: "Summarize decisions and open questions in planning mode",
+  aliases: ["precap"],
+  execute: async (_, context) => {
+    if (context.mode !== "plan") {
+      return {
+        handled: true,
+        output: chalk.yellow("This command is only available in plan mode."),
+      };
+    }
+
+    const conversation = context.messages.filter((message) => message.role !== "system");
+    if (conversation.length === 0) {
+      return {
+        handled: true,
+        output: chalk.yellow("No planning discussion yet. Start with your project goal first."),
+      };
+    }
+
+    const transcript = conversation
+      .slice(-20)
+      .map((message) => `${message.role.toUpperCase()}: ${messageContentToText(message.content)}`)
+      .join("\n\n");
+
+    console.log(chalk.gray("Generating planning recap..."));
+
+    try {
+      const recapResult = await aiService.generateText([
+        {
+          role: "user",
+          content: `Summarize this planning conversation for a teammate.
+
+Return markdown with exactly these sections:
+## Decisions
+- ...
+
+## Open Questions
+- ...
+
+## Recommended Next Step
+- ...
+
+If a section has no items, write "- None".
+
+Conversation:
+${transcript}`,
+        },
+      ]);
+
+      return {
+        handled: true,
+        output: boxen(recapResult.text.trim(), {
+          padding: 1,
+          borderStyle: "round",
+          borderColor: "magenta",
+          title: "📝 Planning Recap",
+        }),
+      };
+    } catch (error) {
+      const errMsg = error instanceof Error ? error.message : String(error);
+      return {
+        handled: true,
+        output: chalk.red(`Could not generate recap: ${errMsg}`),
+      };
+    }
+  },
+});
+
+registerSlashCommand({
   name: "config",
   description: "View or modify configuration",
   execute: async (args) => {
@@ -429,23 +577,16 @@ registerSlashCommand({
   execute: async () => {
     const { toolDescriptions } = await import("../tools/index.ts");
     
-    let output = "";
-    for (const category of toolDescriptions) {
-      output += `${chalk.bold.cyan(category.category)}\n`;
-      for (const tool of category.tools) {
-        output += `  ${chalk.yellow(tool.name.padEnd(16))} ${chalk.gray(tool.description)}\n`;
-      }
-      output += "\n";
-    }
+    const sections = toolDescriptions
+      .map((category) => {
+        const rows = category.tools.map((tool) => `${chalk.cyan(tool.name)} ${chalk.gray("-")} ${chalk.gray(tool.description)}`);
+        return `${chalk.bold.cyan(category.category)}\n${formatList(rows, "gray")}`;
+      })
+      .join("\n\n");
 
     return {
       handled: true,
-      output: boxen(output.trim(), {
-        padding: 1,
-        borderStyle: "round",
-        borderColor: "cyan",
-        title: "🛠️  Available Tools",
-      }),
+      output: createPanel("🛠️ Available Tools", sections, { tone: "primary" }),
     };
   },
 });

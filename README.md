@@ -424,8 +424,9 @@ agentic plan run -i
 ```
 
 This enters an interactive mode where you can:
-- Chat with the AI like a coworker about what you want to build
-- Ask clarifying questions
+- Co-plan with the AI through clear checkpoints: Discovery, Approach, Technology, Agreement
+- Use `status` or `/plan-status` to see live collaboration progress
+- Use `recap` or `/plan-recap` to summarize decisions and open questions
 - Say "create plan" or "let's do it" to generate a formal plan
 - Review and approve the plan before implementation
 
@@ -698,6 +699,10 @@ and I'll help you plan and implement it step by step.
 
 Commands during chat:
   • 'create plan' - Generate a formal plan from our discussion
+  • 'status' - Show current planning checkpoint and progress
+  • 'recap' - Summarize decisions and open questions
+  • '/plan-status' - Slash-command version of status
+  • '/plan-recap' - Slash-command version of recap
   • 'let's do it' - Start implementing
   • 'show plan' - See the current plan
   • 'exit' - End the session

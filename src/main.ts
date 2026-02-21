@@ -4,6 +4,7 @@ import dotenv from "dotenv";
 import chalk from "chalk";
 import figlet from "figlet";
 import { Command } from "commander";
+import { createPanel, formatCommandRows } from "./utils/tui.ts";
 import {
   chatCommand,
   searchCommand,
@@ -23,26 +24,54 @@ import { runAgent } from "./agent/agent.js";
 
 dotenv.config();
 
+function formatTopLevelError(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+process.on("unhandledRejection", (reason: unknown) => {
+  console.error(chalk.red("\n❌ Error:"), formatTopLevelError(reason));
+  if (process.env.AGENTIC_VERBOSE_ERRORS === "1") {
+    console.error(reason);
+  }
+});
+
+process.on("uncaughtException", (error: Error) => {
+  console.error(chalk.red("\n❌ Error:"), formatTopLevelError(error));
+  if (process.env.AGENTIC_VERBOSE_ERRORS === "1") {
+    console.error(error.stack);
+  }
+  process.exit(1);
+});
+
 async function main(): Promise<void> {
   // Display banner
+  let logoText = "";
   try {
-    console.log(
-      chalk.cyan(
-        figlet.textSync("agentic", {
-          font: "Standard",
-          horizontalLayout: "default",
-        })
-      )
-    );
+    logoText = figlet.textSync("agentic", {
+      font: "Standard",
+      horizontalLayout: "default",
+    });
   } catch (error) {
-    // Fallback if font can't be loaded (e.g., in bundled version)
-    console.log(chalk.cyan.bold("\n  ╔═══════════════════════════════════╗"));
-    console.log(chalk.cyan.bold("  ║         agentic CLI             ║"));
-    console.log(chalk.cyan.bold("  ╚═══════════════════════════════════╝\n"));
+    logoText = "agentic CLI";
   }
+  const quickStarts = formatCommandRows([
+    { command: "agentic", description: "Start interactive chat in current directory" },
+    { command: "agentic plan run -i", description: "Collaborative planning mode" },
+    { command: "agentic sessions --list", description: "Browse past sessions" },
+    { command: "/help (in chat)", description: "View slash commands and shortcuts" },
+  ]);
+
   console.log(
-    chalk.gray(
-      "  An agentic CLI for web search, PR reviews, code generation & more\n"
+    createPanel(
+      "agentic CLI",
+      `${chalk.cyan(logoText)}\n` +
+        `${chalk.gray("An agentic CLI for web search, PR reviews, code generation, and project execution.")}\n\n` +
+        `${chalk.bold.white("Quick Start")}\n${quickStarts}`,
+      {
+        tone: "primary",
+        borderStyle: "double",
+        margin: { bottom: 1 },
+      }
     )
   );
 
@@ -84,11 +113,9 @@ async function main(): Promise<void> {
 }
 
 main().catch((error: unknown) => {
-  const errorMessage = error instanceof Error ? error.message : String(error);
-  console.error(chalk.red("\n❌ Error:"), errorMessage);
-  if (process.env.DEBUG) {
+  console.error(chalk.red("\n❌ Error:"), formatTopLevelError(error));
+  if (process.env.AGENTIC_VERBOSE_ERRORS === "1") {
     console.error(error instanceof Error ? error.stack : error);
   }
   process.exit(1);
 });
-

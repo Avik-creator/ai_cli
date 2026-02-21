@@ -2,6 +2,7 @@ import { Command } from "commander";
 import chalk from "chalk";
 import { runAgent } from "../agent/agent.ts";
 import { sessionManager } from "../services/session-manager.ts";
+import { createPanel } from "../utils/tui.ts";
 
 interface RunAgentOptions {
   mode?: string;
@@ -33,19 +34,23 @@ export const sessionsCommand = new Command("sessions")
   .action(async (options: { list?: boolean; delete?: string }) => {
     if (options.delete) {
       sessionManager.deleteSession(options.delete);
-      console.log(chalk.green(`Deleted session: ${options.delete.slice(0, 8)}...`));
+      console.log(createPanel("✅ Session Deleted", chalk.green(`${options.delete.slice(0, 8)}...`), { tone: "success" }));
       return;
     }
     
     if (options.list) {
       const sessions = sessionManager.listSessions();
-      console.log(chalk.bold.cyan("\n📋 Chat Sessions:\n"));
-      console.log(sessionManager.formatSessionList(sessions));
-      console.log(chalk.gray(`\nTotal: ${sessions.length} sessions\n`));
+      console.log(
+        createPanel(
+          "📋 Chat Sessions",
+          `${chalk.gray(`Total: ${sessions.length}`)}\n\n${sessionManager.formatSessionList(sessions)}`,
+          { tone: "primary" }
+        )
+      );
       return;
     }
     
-    console.log(chalk.yellow("Use --list to show sessions or --delete <id> to delete a session"));
+    console.log(createPanel("Sessions", chalk.yellow("Use --list to show sessions or --delete <id> to delete a session"), { tone: "warning" }));
   });
 
 /**
@@ -184,4 +189,3 @@ Please:
       singlePrompt: prompt,
     });
   });
-

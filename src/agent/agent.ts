@@ -1,5 +1,4 @@
 import chalk from "chalk";
-import boxen from "boxen";
 import { text, isCancel } from "@clack/prompts";
 import { aiService } from "../services/ai.service.ts";
 import { getToolsForTask, toolDescriptions } from "../tools/index.ts";
@@ -12,6 +11,7 @@ import { buildSystemPrompt } from "./prompts.ts";
 import { runPlanExecution } from "./plan-executor.ts";
 import { processMessage } from "./message-handler.ts";
 import { isSlashCommand, executeSlashCommand, type SlashCommandContext } from "./slash-commands.ts";
+import { createPanel, formatCommandRows, formatKeyValueRows, formatList } from "../utils/tui.ts";
 
 interface RunAgentOptions {
   mode?: string;
@@ -34,13 +34,7 @@ export async function runAgent(options: RunAgentOptions = {}): Promise<void> {
     await aiService.initialize();
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : String(error);
-    console.log(
-      boxen(chalk.red(`❌ ${errorMessage}`), {
-        padding: 1,
-        borderStyle: "round",
-        borderColor: "red",
-      })
-    );
+    console.log(createPanel("❌ Initialization Error", chalk.red(errorMessage), { tone: "error" }));
     console.log(
       chalk.yellow("\nRun 'agentic config setup' to configure your API keys.\n") +
       chalk.gray("You need AI_GATEWAY_API_KEY from https://vercel.com/ai-gateway\n")
@@ -56,32 +50,43 @@ export async function runAgent(options: RunAgentOptions = {}): Promise<void> {
     const currentProviderId = await getCurrentProvider();
     const provider = PROVIDERS[currentProviderId];
 
-    console.log(
-      boxen(
-        chalk.bold.cyan("🚀 agentic AI Agent\n\n") +
-        chalk.gray("An agentic assistant for development tasks\n") +
-        chalk.gray(`Provider: ${chalk.white(provider.name)} | `) +
-        chalk.gray(`Mode: ${chalk.white(mode)} | Tools: ${chalk.white(toolNames.length)}\n`) +
-        chalk.gray(`Model: ${chalk.white(currentModel)}`),
-        {
-          padding: 1,
-          margin: { top: 1, bottom: 1 },
-          borderStyle: "double",
-          borderColor: "cyan",
-        }
-      )
-    );
+    const heroBody =
+      `${chalk.gray("An agentic assistant for development tasks")}\n\n` +
+      formatKeyValueRows([
+        { key: "Provider", value: provider.name },
+        { key: "Model", value: currentModel },
+        { key: "Mode", value: mode },
+        { key: "Tools", value: `${toolNames.length}` },
+      ]);
 
     console.log(
-      boxen(
-        `${chalk.gray("Available tools:")}\n` +
-        toolNames.map((t) => chalk.cyan(`  • ${t}`)).join("\n") +
-        `\n\n${chalk.gray('Type "help" for commands, "/help" for slash commands, "exit" to quit')}`,
+      createPanel("🚀 Agent Session", heroBody, {
+        tone: "primary",
+        borderStyle: "double",
+        margin: { top: 1, bottom: 1 },
+      })
+    );
+
+    const previewTools = toolNames.slice(0, 8).map((toolName) => chalk.white(toolName));
+    const hiddenCount = Math.max(toolNames.length - previewTools.length, 0);
+    const quickCommands = formatCommandRows([
+      { command: "help", description: "Show keyboard/text commands" },
+      { command: "/help", description: "Show slash commands" },
+      { command: "tools", description: "See available tools by category" },
+      { command: "exit", description: "Save and leave this session" },
+    ]);
+
+    console.log(
+      createPanel(
+        "🧭 Quick Start",
+        `${chalk.bold.white("Available tools")}\n` +
+          `${formatList(previewTools, "cyan")}` +
+          (hiddenCount > 0 ? `\n${chalk.gray(`• +${hiddenCount} more (type "tools")`)}` : "") +
+          `\n\n${chalk.bold.white("Commands")}\n${quickCommands}`,
         {
-          padding: 1,
-          borderStyle: "round",
-          borderColor: "gray",
+          tone: "neutral",
           dimBorder: true,
+          margin: { bottom: 1 },
         }
       )
     );
@@ -131,7 +136,11 @@ export async function runAgent(options: RunAgentOptions = {}): Promise<void> {
   }
 
   const personality = sessionManager.getActivePersonality();
-  console.log(chalk.gray(`Session: ${currentSessionId?.slice(0, 8)}... | Personality: ${personality}`));
+  console.log(
+    chalk.gray(`Session ${currentSessionId?.slice(0, 8)}...`) +
+    chalk.gray("  |  ") +
+    chalk.gray(`Personality ${personality}`)
+  );
 
   while (true) {
     const userInput = await text({
@@ -177,7 +186,6 @@ export async function runAgent(options: RunAgentOptions = {}): Promise<void> {
       }
       
       if (result.modelChanged) {
-        const newModelId = aiService.getModelId();
         messages[0] = {
           role: "system",
           content: await buildSystemPrompt(),
@@ -226,56 +234,63 @@ export async function runAgent(options: RunAgentOptions = {}): Promise<void> {
 }
 
 function showHelp(): void {
+  const commandSection = formatCommandRows([
+    { command: "help", description: "Show this help panel" },
+    { command: "tools", description: "List available tools" },
+    { command: "clear", description: "Clear conversation history" },
+    { command: "exit", description: "Exit the agent" },
+  ]);
+
+  const slashSection = formatCommandRows([
+    { command: "/model", description: "Change AI model interactively" },
+    { command: "/provider", description: "Change AI provider" },
+    { command: "/clear", description: "Clear conversation (same as clear)" },
+    { command: "/compact", description: "Summarize and compact context" },
+    { command: "/sessions", description: "List chat sessions" },
+    { command: "/config", description: "View/modify configuration" },
+    { command: "/info", description: "Show session info" },
+    { command: "/exit", description: "Exit the agent" },
+  ]);
+
+  const examples = [
+    '"Search for React best practices"',
+    '"Review PR https://github.com/owner/repo/pull/123"',
+    '"Create a new Express API project"',
+    '"Read package.json and explain the dependencies"',
+    '"Run npm test and fix any failing tests"',
+  ];
+
   console.log(
-    boxen(
-      `${chalk.bold.cyan("Commands:")}\n\n` +
-      `${chalk.yellow("help")}    - Show this help message\n` +
-      `${chalk.yellow("tools")}   - List available tools\n` +
-      `${chalk.yellow("clear")}   - Clear conversation history\n` +
-      `${chalk.yellow("exit")}    - Exit the agent\n\n` +
-      `${chalk.bold.cyan("Slash Commands:")}\n\n` +
-      `${chalk.cyan("/model")}   - Change AI model interactively\n` +
-      `${chalk.cyan("/provider")}- Change AI provider\n` +
-      `${chalk.cyan("/clear")}   - Clear conversation (same as clear)\n` +
-      `${chalk.cyan("/compact")} - Summarize and compact context\n` +
-      `${chalk.cyan("/sessions")}- List chat sessions\n` +
-      `${chalk.cyan("/config")}  - View/modify configuration\n` +
-      `${chalk.cyan("/info")}    - Show session info\n` +
-      `${chalk.cyan("/exit")}    - Exit the agent\n\n` +
-      `${chalk.bold.cyan("Examples:")}\n\n` +
-      `${chalk.gray('• "Search for React best practices"')}\n` +
-      `${chalk.gray('• "Review PR https://github.com/owner/repo/pull/123"')}\n` +
-      `${chalk.gray('• "Create a new Express API project"')}\n` +
-      `${chalk.gray('• "Read package.json and explain the dependencies"')}\n` +
-      `${chalk.gray('• "Run npm test and fix any failing tests"')}`,
+    createPanel(
+      "💡 Help",
+      `${chalk.bold.white("Commands")}\n${commandSection}\n\n` +
+        `${chalk.bold.white("Slash Commands")}\n${slashSection}\n\n` +
+        `${chalk.bold.white("Examples")}\n${formatList(examples, "gray")}`,
       {
-        padding: 1,
+        tone: "primary",
         margin: 1,
-        borderStyle: "round",
-        borderColor: "cyan",
-        title: "💡 Help",
       }
     )
   );
 }
 
 function showTools(): void {
-  let output = "";
-  for (const category of toolDescriptions) {
-    output += `${chalk.bold.cyan(category.category)}\n`;
-    for (const tool of category.tools) {
-      output += `  ${chalk.yellow(tool.name.padEnd(16))} ${chalk.gray(tool.description)}\n`;
-    }
-    output += "\n";
-  }
+  const sections = toolDescriptions
+    .map((category) => {
+      const rows = formatCommandRows(
+        category.tools.map((tool) => ({
+          command: tool.name,
+          description: tool.description,
+        }))
+      );
+      return `${chalk.bold.cyan(category.category)}\n${rows}`;
+    })
+    .join("\n\n");
 
   console.log(
-    boxen(output.trim(), {
-      padding: 1,
+    createPanel("🛠️ Available Tools", sections, {
+      tone: "primary",
       margin: 1,
-      borderStyle: "round",
-      borderColor: "cyan",
-      title: "🛠️  Available Tools",
     })
   );
 }

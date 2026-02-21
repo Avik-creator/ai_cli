@@ -1,5 +1,6 @@
 import chalk from "chalk";
 import boxen from "boxen";
+import { createPanel, renderDivider } from "../utils/tui.ts";
 
 export interface ToolCall {
   toolName: string;
@@ -16,21 +17,21 @@ export interface ToolResult {
 
 export function displayToolCall(toolCall: ToolCall): void {
   const argsJson = JSON.stringify(toolCall.args, null, 2);
-  const argsPreview = argsJson.substring(0, 200);
-  const isTruncated = argsJson.length > 200;
+  const argsPreview = argsJson.substring(0, 260);
+  const isTruncated = argsJson.length > 260;
 
-  const box = boxen(
-    `${chalk.cyan("Tool:")} ${chalk.bold(toolCall.toolName)}\n` +
-    `${chalk.gray("Args:")} ${argsPreview}${isTruncated ? "..." : ""}`,
+  const panel = createPanel(
+    "Tool Call",
+    `${chalk.bold.white(toolCall.toolName)}\n` +
+      `${chalk.gray("Args")} ${argsPreview}${isTruncated ? chalk.gray(" ...") : ""}`,
     {
+      tone: "info",
       padding: { left: 1, right: 1, top: 0, bottom: 0 },
       margin: { left: 2 },
-      borderStyle: "round",
-      borderColor: "cyan",
       dimBorder: true,
     }
   );
-  console.log(box);
+  console.log(panel);
 }
 
 export function displayToolResult(toolResult: ToolResult): void {
@@ -43,7 +44,7 @@ export function displayToolResult(toolResult: ToolResult): void {
   let resultPreview = "";
   if (toolResult.result) {
     if (typeof toolResult.result === "string") {
-      resultPreview = toolResult.result.substring(0, 100);
+      resultPreview = toolResult.result.substring(0, 140);
     } else if (typeof toolResult.result === "object" && "error" in toolResult.result) {
       resultPreview = (toolResult.result as { error: string }).error;
     } else {
@@ -52,52 +53,24 @@ export function displayToolResult(toolResult: ToolResult): void {
   }
 
   const colorFn = color === "green" ? chalk.green : chalk.red;
-  const isTruncated = resultPreview.length >= 100;
+  const isTruncated = resultPreview.length >= 140;
   console.log(colorFn(`  ${icon} ${toolResult.toolName}: ${resultPreview}${isTruncated ? "..." : ""}`));
 }
 
 export function displayError(message: string, title: string = "Error"): void {
-  console.log(
-    boxen(chalk.red(`❌ ${message}`), {
-      padding: 1,
-      borderStyle: "round",
-      borderColor: "red",
-      title,
-    })
-  );
+  console.log(createPanel(`❌ ${title}`, chalk.red(message), { tone: "error" }));
 }
 
 export function displaySuccess(message: string, title: string = "Success"): void {
-  console.log(
-    boxen(chalk.green(`✅ ${message}`), {
-      padding: 1,
-      borderStyle: "round",
-      borderColor: "green",
-      title,
-    })
-  );
+  console.log(createPanel(`✅ ${title}`, chalk.green(message), { tone: "success" }));
 }
 
 export function displayInfo(message: string, title: string = "Info"): void {
-  console.log(
-    boxen(message, {
-      padding: 1,
-      borderStyle: "round",
-      borderColor: "cyan",
-      title,
-    })
-  );
+  console.log(createPanel(title, message, { tone: "primary" }));
 }
 
 export function displayWarning(message: string, title: string = "Warning"): void {
-  console.log(
-    boxen(chalk.yellow(message), {
-      padding: 1,
-      borderStyle: "round",
-      borderColor: "yellow",
-      title,
-    })
-  );
+  console.log(createPanel(title, chalk.yellow(message), { tone: "warning" }));
 }
 
 export function createBox(
@@ -124,5 +97,5 @@ export function createBox(
 }
 
 export function displaySeparator(char: string = "─", length: number = 60): void {
-  console.log(chalk.gray(char.repeat(length)));
+  console.log(renderDivider(char, length));
 }

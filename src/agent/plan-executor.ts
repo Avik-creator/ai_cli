@@ -14,6 +14,7 @@ import { displayToolCall, displaySeparator } from "./display.ts";
 import { isSlashCommand, executeSlashCommand, type SlashCommandContext } from "./slash-commands.ts";
 import type { ToolCall } from "./display.ts";
 import type { CoreMessage } from "ai";
+import { getPlanningProgress } from "./planning-state.ts";
 import fs from "fs";
 
 marked.use(
@@ -33,11 +34,110 @@ marked.use(
 );
 
 const PLAN_DIR = ".agentic-plan";
+const PLAN_QUICK_COMMANDS = "help | status | recap | /plan-status | /plan-recap | exit";
+const COLLABORATIVE_PLANNING_GUIDE = `You are in planning mode and acting as a collaborative engineering partner.
+
+Use this interaction contract on EVERY planning response:
+1) Start with "Checkpoint: Discovery|Approach|Technology|Agreement"
+2) Add one short line: "What I heard: ..."
+3) If a decision is needed, present at most 2 concrete options with tradeoffs
+4) End with exactly one clear next question for the user
+
+Rules:
+- Keep responses concise (generally <= 10 lines unless asked for more)
+- Ask for missing constraints before making assumptions
+- Highlight risks honestly and explain why
+- Do not write implementation code in planning mode
+- Never finalize a plan until the user explicitly confirms`;
 
 function ensurePlanDir(): void {
   if (!fs.existsSync(PLAN_DIR)) {
     fs.mkdirSync(PLAN_DIR, { recursive: true });
   }
+}
+
+async function buildPlanningSystemPrompt(isResumedSession: boolean): Promise<string> {
+  const systemPrompt = await buildSystemPrompt();
+  const sessionModeInstructions = isResumedSession
+    ? "You are resuming a previous planning conversation. Keep your first response short, acknowledge context, and ask how to continue."
+    : "You are in a NEW planning conversation. Keep your first response short, welcoming, and ask what they want to build.";
+
+  return `${systemPrompt}
+
+---
+${COLLABORATIVE_PLANNING_GUIDE}
+
+${sessionModeInstructions}
+
+When the user confirms with phrases like "create plan", "let's do it", or "sounds good":
+1. Use writeFile to write ".agentic-plan/plan-ready.txt" with the agreed approach
+2. Wait for the system to generate the formal plan and artifacts`;
+}
+
+function renderPlanningStatus(messages: CoreMessage[], sessionId: string): void {
+  const progress = getPlanningProgress(messages);
+  const activeStageIndex = progress.stages.findIndex((stage) => stage.id === progress.currentStage.id);
+  const progressBar = progress.stages
+    .map((stage, index) => {
+      if (index < activeStageIndex) return chalk.green("■");
+      if (index === activeStageIndex) return chalk.cyan("▣");
+      return chalk.gray("□");
+    })
+    .join(" ");
+
+  const stageLines = progress.stages
+    .map((stage) => {
+      if (stage.id === progress.currentStage.id) {
+        return `  ${chalk.cyan("➜")} ${chalk.cyan(stage.label)}`;
+      }
+      if (stage.complete) {
+        return `  ${chalk.green("✓")} ${chalk.green(stage.label)}`;
+      }
+      return `  ${chalk.gray("•")} ${chalk.gray(stage.label)}`;
+    })
+    .join("\n");
+
+  console.log(
+    boxen(
+      `${chalk.bold.cyan("Session")} ${chalk.white(sessionId.slice(0, 8))}...\n` +
+      `${chalk.bold.cyan("Progress")} ${progressBar} ${chalk.gray(`(${progress.completedCount}/${progress.totalStages} complete)`)}\n` +
+      `${chalk.bold.cyan("Turns")} ${chalk.white(`${progress.userTurns} user / ${progress.assistantTurns} assistant`)}\n\n` +
+      `${stageLines}\n\n` +
+      `${chalk.yellow("Next")} ${progress.nextStepHint}`,
+      {
+        padding: 1,
+        margin: { top: 1, bottom: 1 },
+        borderStyle: "round",
+        borderColor: "cyan",
+        title: "🤝 Planning Status",
+      }
+    )
+  );
+}
+
+function renderPlanningHelp(): void {
+  console.log(
+    boxen(
+      `${chalk.bold.cyan("Quick Commands")}\n\n` +
+      `${chalk.yellow("help")}      Show this planning help\n` +
+      `${chalk.yellow("status")}    Show collaboration progress\n` +
+      `${chalk.yellow("recap")}     Summarize decisions + open questions\n` +
+      `${chalk.yellow("/plan-status")}  Slash version of status\n` +
+      `${chalk.yellow("/plan-recap")}   Slash version of recap\n` +
+      `${chalk.yellow("exit")}      Save and quit\n\n` +
+      `${chalk.bold.cyan("Collaboration Tips")}\n\n` +
+      `${chalk.gray("• Share constraints early (timeline, scope, stack, team size)")}\n` +
+      `${chalk.gray("• Ask for tradeoffs if two options seem close")}\n` +
+      `${chalk.gray("• Say 'create plan' when you want to formalize")}`,
+      {
+        padding: 1,
+        margin: { top: 1, bottom: 1 },
+        borderStyle: "round",
+        borderColor: "yellow",
+        title: "🧭 Plan Mode Help",
+      }
+    )
+  );
 }
 
 async function generateArchitectureDiagram(spec: any): Promise<void> {
@@ -276,13 +376,17 @@ export async function runInteractivePlanning(): Promise<void> {
   const sessions = sessionStorage.listPlanningSessions();
   let currentSessionId: string | null = null;
   let isNewSession = false;
+  let resumedSessionLastActivity: string | null = null;
 
   if (sessions.length > 0) {
     const options = [
-      { value: "new", label: "Start new planning session" },
+      {
+        value: "new",
+        label: `${chalk.bold.cyan("Start new planning session")} ${chalk.gray("(fresh collaboration)")}`,
+      },
       ...sessions.filter(s => s.status === "active").map(s => ({
         value: s.id,
-        label: `Resume session from ${new Date(s.lastActivity).toLocaleString()}`,
+        label: `${chalk.white("Resume")} ${chalk.cyan(s.id.slice(0, 8))}... ${chalk.gray(new Date(s.lastActivity).toLocaleString())}`,
       })),
     ];
 
@@ -296,6 +400,7 @@ export async function runInteractivePlanning(): Promise<void> {
       isNewSession = true;
     } else {
       currentSessionId = choice as string;
+      resumedSessionLastActivity = sessions.find((session) => session.id === currentSessionId)?.lastActivity ?? null;
     }
   } else {
     isNewSession = true;
@@ -309,32 +414,37 @@ export async function runInteractivePlanning(): Promise<void> {
   if (isNewSession) {
     console.log(
       boxen(
-        chalk.bold.cyan("🎯 Interactive Planning Session\n\n") +
-        chalk.gray("Let's plan something together. Tell me what you want to build.\n\n") +
-        chalk.yellow("How this works:\n") +
-        chalk.white("1. You tell me what you want to build\n") +
-        chalk.white("2. We discuss the approach together\n") +
-        chalk.white("3. We agree on the tech stack\n") +
-        chalk.white("4. I create a plan, tickets, and architecture\n\n") +
-        chalk.dim("Say 'exit' to save and quit anytime"),
+        chalk.bold.cyan("Collaborative Planning Studio\n\n") +
+        chalk.gray("We will co-design the plan before any implementation happens.\n\n") +
+        chalk.yellow("Workflow:\n") +
+        chalk.white("1. Discovery  2. Approach  3. Technology  4. Agreement\n\n") +
+        chalk.yellow("Quick commands:\n") +
+        chalk.white(`• ${PLAN_QUICK_COMMANDS}\n\n`) +
+        chalk.dim("Say 'create plan' when the direction is final."),
         {
           padding: 1,
           margin: { top: 1, bottom: 1 },
-          borderStyle: "round",
+          borderStyle: "double",
           borderColor: "cyan",
+          title: "🎯 Plan Mode",
         }
       )
     );
   } else {
     console.log(
       boxen(
-        chalk.bold.cyan("🎯 Resumed Planning Session\n\n") +
-        chalk.gray("Continuing from where we left off...\n"),
+        chalk.bold.cyan("Resumed Planning Session\n\n") +
+        chalk.gray("Continuing from your previous collaboration.\n") +
+        (resumedSessionLastActivity
+          ? `${chalk.gray(`Last activity: ${new Date(resumedSessionLastActivity).toLocaleString()}\n`)}`
+          : "") +
+        chalk.white(`Quick commands: ${PLAN_QUICK_COMMANDS}`),
         {
           padding: 1,
           margin: { top: 1, bottom: 1 },
           borderStyle: "round",
           borderColor: "cyan",
+          title: "♻️ Resume",
         }
       )
     );
@@ -342,38 +452,30 @@ export async function runInteractivePlanning(): Promise<void> {
 
   await aiService.initialize();
 
-  const systemPrompt = await buildSystemPrompt();
   const messages: CoreMessage[] = [];
 
   if (isNewSession) {
     messages.push({
       role: "system",
-      content: `${systemPrompt}
-
----
-You are in a NEW planning conversation. The user will tell you what they want to build.
-Follow the Interactive Planning Session flow from the system prompt.
-Keep your FIRST response SHORT - just a friendly greeting and ask what they want to build.`,
+      content: await buildPlanningSystemPrompt(false),
     });
   } else {
     const savedMessages = sessionStorage.getPlanningMessages(currentSessionId!);
     messages.push({
       role: "system",
-      content: `${systemPrompt}
-
----
-You are resuming a previous planning conversation. The user wants to continue from where they left off.
-Keep your response SHORT - acknowledge you're back and ask how they want to proceed.`,
+      content: await buildPlanningSystemPrompt(true),
     });
     for (const msg of savedMessages) {
       messages.push({ role: msg.role, content: msg.content });
     }
   }
 
+  renderPlanningStatus(messages, currentSessionId!);
+
   while (true) {
     const userInput = await text({
       message: chalk.blue("💬 You"),
-      placeholder: "Tell me what you want to build... (/help for commands)",
+      placeholder: "Describe your goal, constraints, or preferred approach...",
     });
 
     if (isCancel(userInput)) {
@@ -382,6 +484,30 @@ Keep your response SHORT - acknowledge you're back and ask how they want to proc
     }
 
     const input = (userInput as string).trim();
+    const normalizedInput = input.toLowerCase();
+
+    if (normalizedInput === "help" || normalizedInput === "commands") {
+      renderPlanningHelp();
+      continue;
+    }
+
+    if (normalizedInput === "status") {
+      renderPlanningStatus(messages, currentSessionId!);
+      continue;
+    }
+
+    if (normalizedInput === "recap") {
+      const slashContext: SlashCommandContext = {
+        messages,
+        sessionId: currentSessionId,
+        mode: "plan",
+      };
+      const recapResult = await executeSlashCommand("/plan-recap", slashContext);
+      if (recapResult.output) {
+        console.log(recapResult.output);
+      }
+      continue;
+    }
 
     if (isSlashCommand(input)) {
       const slashContext: SlashCommandContext = {
@@ -399,14 +525,14 @@ Keep your response SHORT - acknowledge you're back and ask how they want to proc
         messages.length = 1;
         messages[0] = {
           role: "system",
-          content: await buildSystemPrompt(),
+          content: await buildPlanningSystemPrompt(false),
         };
       }
       
       if (result.modelChanged) {
         messages[0] = {
           role: "system",
-          content: await buildSystemPrompt(),
+          content: await buildPlanningSystemPrompt(messages.length > 1),
         };
         console.log(chalk.gray(`\nReinitialized with new model: ${aiService.getModelId()}\n`));
       }
@@ -435,8 +561,20 @@ Keep your response SHORT - acknowledge you're back and ask how they want to proc
       (chunk) => {
         if (fullResponse === "") {
           spin.stop();
-          console.log(chalk.green.bold("\n🤖\n"));
-          displaySeparator();
+          console.log(
+            boxen(
+              chalk.bold.green("Planning Partner\n") +
+              chalk.gray("Working through tradeoffs with you before implementation."),
+              {
+                padding: { top: 0, bottom: 0, left: 1, right: 1 },
+                margin: { top: 1, bottom: 0 },
+                borderStyle: "round",
+                borderColor: "green",
+                title: "🤝 Assistant",
+              }
+            )
+          );
+          displaySeparator("─", 72);
         }
         fullResponse += chunk;
       },
@@ -456,7 +594,10 @@ Keep your response SHORT - acknowledge you're back and ask how they want to proc
       sessionStorage.addPlanningMessage(currentSessionId!, "assistant", fullResponse);
     }
 
-    displaySeparator();
+    const progress = getPlanningProgress(messages);
+    console.log(chalk.gray(`Next: ${progress.nextStepHint}`));
+    console.log(chalk.dim(`Commands: ${PLAN_QUICK_COMMANDS}`));
+    displaySeparator("─", 72);
 
     const planReadyFile = `${PLAN_DIR}/plan-ready.txt`;
     if (fs.existsSync(planReadyFile)) {

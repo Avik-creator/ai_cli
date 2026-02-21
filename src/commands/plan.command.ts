@@ -578,9 +578,9 @@ export const planCommand = new Command("plan")
         const { runAgent } = await import("../agent/agent.js");
         
         if (options?.interactive) {
-          console.log(chalk.cyan("\n🎯 Starting interactive planning session...\n"));
-          console.log(chalk.gray("Tell me what you want to build. I'll ask questions and we can plan together.\n"));
-          console.log(chalk.gray("When ready, say 'create plan' or 'let's do it' to generate the plan.\n"));
+          console.log(chalk.cyan("\n🎯 Starting collaborative planning studio...\n"));
+          console.log(chalk.gray("We will co-design scope, approach, and stack before implementation.\n"));
+          console.log(chalk.gray("Use 'status' for progress, 'recap' for decisions, and 'create plan' when ready.\n"));
           
           const { runInteractivePlanning } = await import("../agent/plan-executor.js");
           await runInteractivePlanning();

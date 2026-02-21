@@ -29,6 +29,102 @@ interface SendMessageResult {
   steps?: unknown[];
 }
 
+function collectErrorSignals(error: unknown, depth: number = 0): { messages: string[]; statusCode?: number } {
+  if (!error || depth > 3) {
+    return { messages: [] };
+  }
+
+  const messages: string[] = [];
+  let statusCode: number | undefined;
+  const anyError = error as Record<string, unknown>;
+
+  if (error instanceof Error && error.message) {
+    messages.push(error.message);
+  }
+
+  if (typeof anyError.responseBody === "string") {
+    messages.push(anyError.responseBody);
+  }
+
+  if (typeof anyError.statusCode === "number") {
+    statusCode = anyError.statusCode;
+  }
+
+  if (anyError.data && typeof anyError.data === "object") {
+    const data = anyError.data as Record<string, unknown>;
+    if (data.error && typeof data.error === "object") {
+      const providerErr = data.error as Record<string, unknown>;
+      if (typeof providerErr.message === "string") {
+        messages.push(providerErr.message);
+      }
+      if (typeof providerErr.code === "string") {
+        messages.push(providerErr.code);
+      }
+      if (typeof providerErr.type === "string") {
+        messages.push(providerErr.type);
+      }
+    }
+  }
+
+  if (anyError.cause) {
+    const nested = collectErrorSignals(anyError.cause, depth + 1);
+    messages.push(...nested.messages);
+    if (nested.statusCode !== undefined) {
+      statusCode = nested.statusCode;
+    }
+  }
+
+  return { messages, statusCode };
+}
+
+function toUserFacingAIError(error: unknown): Error {
+  const { messages, statusCode } = collectErrorSignals(error);
+  const signalText = messages.join(" ").toLowerCase();
+
+  if (
+    statusCode === 413 ||
+    signalText.includes("request too large") ||
+    signalText.includes("tokens per minute") ||
+    signalText.includes("tpm") ||
+    signalText.includes("rate_limit_exceeded")
+  ) {
+    return new Error(
+      "Request is too large for the current model limits. Try /compact, /clear, a shorter prompt, or switch models with /model."
+    );
+  }
+
+  if (signalText.includes("rate limit") || signalText.includes("too many requests")) {
+    return new Error("Provider rate limit reached. Please wait a few seconds and try again.");
+  }
+
+  if (
+    statusCode === 401 ||
+    statusCode === 403 ||
+    signalText.includes("unauthorized") ||
+    signalText.includes("invalid api key") ||
+    signalText.includes("authentication")
+  ) {
+    return new Error("Authentication failed for the current provider. Run `agentic config setup` to update credentials.");
+  }
+
+  if (
+    signalText.includes("network") ||
+    signalText.includes("timeout") ||
+    signalText.includes("econnreset") ||
+    signalText.includes("fetch failed")
+  ) {
+    return new Error("Network error while contacting the model provider. Please try again.");
+  }
+
+  return new Error("Model request failed. Please try again or switch models with /model.");
+}
+
+function logVerboseAIError(context: string, error: unknown): void {
+  if (process.env.AGENTIC_VERBOSE_ERRORS === "1") {
+    console.error(chalk.red(`${context}:`), error);
+  }
+}
+
 export class AIService {
   private model: ModelInstance | null = null;
   private initialized = false;
@@ -250,9 +346,8 @@ export class AIService {
         steps: Array.isArray(steps) ? steps : [],
       };
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : String(error);
-      console.error(chalk.red("AI Service Error:"), errorMessage);
-      throw error;
+      logVerboseAIError("AI Service Error", error);
+      throw toUserFacingAIError(error);
     }
   }
 
@@ -280,7 +375,12 @@ export class AIService {
       textConfig.stopWhen = stepCountIs(options.maxSteps || 10);
     }
 
-    return await generateText(textConfig as Parameters<typeof generateText>[0]);
+    try {
+      return await generateText(textConfig as Parameters<typeof generateText>[0]);
+    } catch (error) {
+      logVerboseAIError("Text Generation Error", error);
+      throw toUserFacingAIError(error);
+    }
   }
 
   /**
@@ -303,9 +403,8 @@ export class AIService {
 
       return result.object as z.infer<T>;
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : String(error);
-      console.error(chalk.red("Structured Generation Error:"), errorMessage);
-      throw error;
+      logVerboseAIError("Structured Generation Error", error);
+      throw toUserFacingAIError(error);
     }
   }
 
@@ -362,4 +461,3 @@ export class AIService {
 }
 
 export const aiService = new AIService();
-

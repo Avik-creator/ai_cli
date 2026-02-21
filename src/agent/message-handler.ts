@@ -1,5 +1,4 @@
 import chalk from "chalk";
-import boxen from "boxen";
 import yoctoSpinner from "yocto-spinner";
 import { marked } from "marked";
 import { markedTerminal } from "marked-terminal";
@@ -12,6 +11,7 @@ import { specStorage } from "../services/planning/spec-storage.js";
 import { exportService } from "../services/planning/export.js";
 import { displayToolCall, displayToolResult, displaySeparator } from "./display.ts";
 import type { ToolCall, ToolResult } from "./display.ts";
+import { createPanel } from "../utils/tui.ts";
 import fs from "fs";
 import { runPlanExecution } from "./plan-executor.ts";
 
@@ -53,13 +53,10 @@ export async function processMessage(
   }
 
   console.log(
-    boxen(chalk.white(input), {
+    createPanel("👤 You", chalk.white(input), {
+      tone: "info",
       padding: 1,
       margin: { left: 2, top: 1, bottom: 1 },
-      borderStyle: "round",
-      borderColor: "blue",
-      title: "👤 You",
-      titleAlignment: "left",
     })
   );
 
@@ -68,14 +65,23 @@ export async function processMessage(
   try {
     let fullResponse = "";
     let isFirstChunk = true;
-    const toolCallsProcessed: ToolCall[] = [];
 
     const result = await aiService.sendMessage(
       messages,
       (chunk: string) => {
         if (isFirstChunk) {
           spin.stop();
-          console.log(chalk.green.bold("\n🤖 agentic:"));
+          console.log(
+            createPanel(
+              "🤖 Assistant",
+              chalk.gray("Thinking with tools and returning the best next step."),
+              {
+                tone: "success",
+                padding: { top: 0, bottom: 0, left: 1, right: 1 },
+                margin: { top: 1, bottom: 0 },
+              }
+            )
+          );
           displaySeparator();
           isFirstChunk = false;
         }
@@ -88,7 +94,6 @@ export async function processMessage(
           isFirstChunk = false;
         }
         displayToolCall(toolCall as ToolCall);
-        toolCallsProcessed.push(toolCall as ToolCall);
       },
       { maxSteps }
     );
@@ -199,13 +204,6 @@ export async function processMessage(
   } catch (error) {
     spin.stop();
     const errorMessage = error instanceof Error ? error.message : String(error);
-    console.log(
-      boxen(chalk.red(`❌ Error: ${errorMessage}`), {
-        padding: 1,
-        margin: 1,
-        borderStyle: "round",
-        borderColor: "red",
-      })
-    );
+    console.log(createPanel("❌ Error", chalk.red(errorMessage), { tone: "error", margin: 1 }));
   }
 }
