@@ -105,3 +105,54 @@ export function formatList(items: string[], color: "cyan" | "gray" | "green" | "
   return items.map((item) => `${colorFn("•")} ${item}`).join("\n");
 }
 
+function centeredLine(text: string): string {
+  const width = process.stdout.columns ?? 80;
+  const leftPadding = Math.max(0, Math.floor((width - text.length) / 2));
+  return `${" ".repeat(leftPadding)}${text}`;
+}
+
+function stylizeWordmark(text: string): string {
+  return text
+    .split("")
+    .map((char, index) => (index % 2 === 0 ? chalk.hex("#9ea0a2")(char) : chalk.hex("#f2f2f2")(char)))
+    .join("");
+}
+
+export function renderWordmark(text: string = "agentic"): void {
+  const mark = stylizeWordmark(text.toLowerCase());
+  console.log("");
+  console.log(centeredLine(mark));
+  console.log("");
+}
+
+export interface PromptDockOptions {
+  hint: string;
+  agentLabel: string;
+  modelLabel: string;
+  providerLabel: string;
+  toolsLabel?: string;
+  shortcuts?: string;
+}
+
+export function renderPromptDock(options: PromptDockOptions): void {
+  const rail = chalk.hex("#00e2ff")("│");
+  const bg = chalk.bgHex("#232427");
+  const muted = chalk.hex("#7c7f83");
+  const bright = chalk.hex("#e8e8e8");
+  const accent = chalk.hex("#00e2ff");
+
+  const hintLine = `${muted("Ask anything...")} ${options.hint}`;
+  const metadata = [
+    accent(options.agentLabel),
+    bright(options.modelLabel),
+    bright(options.toolsLabel ?? "Custom Tools"),
+    muted(options.providerLabel),
+  ].join(` ${muted("•")} `);
+
+  console.log(`${rail}${bg(` ${hintLine} `)}`);
+  console.log(`${rail}${bg(` ${metadata} `)}`);
+
+  if (options.shortcuts) {
+    console.log(centeredLine(muted(options.shortcuts)));
+  }
+}

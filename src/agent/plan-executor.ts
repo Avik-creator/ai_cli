@@ -10,7 +10,7 @@ import { specStorage } from "../services/planning/spec-storage.ts";
 import { exportService } from "../services/planning/export.ts";
 import { sessionStorage } from "../services/storage/session-storage.ts";
 import { buildSystemPrompt, formatSpecForPrompt } from "./prompts.ts";
-import { displayToolCall, displaySeparator } from "./display.ts";
+import { displayToolCall, displaySeparator, displayWarning } from "./display.ts";
 import { isSlashCommand, executeSlashCommand, type SlashCommandContext } from "./slash-commands.ts";
 import type { ToolCall } from "./display.ts";
 import type { CoreMessage } from "ai";
@@ -138,6 +138,26 @@ function renderPlanningHelp(): void {
       }
     )
   );
+}
+
+function getFriendlyPlanningError(error: unknown): string {
+  const message = error instanceof Error ? error.message : String(error);
+  const normalized = message.toLowerCase();
+
+  if (
+    normalized.includes("too large") ||
+    normalized.includes("tokens per minute") ||
+    normalized.includes("rate_limit_exceeded") ||
+    normalized.includes("model limits")
+  ) {
+    return "Request is too large for this model. Use /compact, /clear, or /model to continue with a smaller context.";
+  }
+
+  if (normalized.includes("rate limit")) {
+    return "Provider rate limit reached. Wait a few seconds and try again.";
+  }
+
+  return message;
 }
 
 async function generateArchitectureDiagram(spec: any): Promise<void> {
@@ -278,25 +298,31 @@ Then ask: "Should I start implementing these changes? (yes/no)"
 
 DO NOT make any changes until the user explicitly confirms.`;
 
-  await aiService.sendMessage(
-    [
-      {
-        role: "system",
-        content: combinedSystemPrompt,
+  try {
+    await aiService.sendMessage(
+      [
+        {
+          role: "system",
+          content: combinedSystemPrompt,
+        },
+      ],
+      (chunk) => {
+        if (fullResponse === "") {
+          spin.stop();
+          console.log(chalk.green.bold("\n🤖 AI Plan:\n"));
+          displaySeparator();
+        }
+        fullResponse += chunk;
       },
-    ],
-    (chunk) => {
-      if (fullResponse === "") {
-        spin.stop();
-        console.log(chalk.green.bold("\n🤖 AI Plan:\n"));
-        displaySeparator();
-      }
-      fullResponse += chunk;
-    },
-    {},
-    undefined,
-    { maxSteps: 5 }
-  );
+      {},
+      undefined,
+      { maxSteps: 5 }
+    );
+  } catch (error) {
+    spin.stop();
+    displayWarning(getFriendlyPlanningError(error), "Model Request Failed");
+    return false;
+  }
 
   spin.stop();
 
@@ -330,34 +356,39 @@ Start implementing now.`;
 
   let implResponse = "";
 
-  await aiService.sendMessage(
-    [
-      {
-        role: "system",
-        content: combinedSystemPrompt,
+  try {
+    await aiService.sendMessage(
+      [
+        {
+          role: "system",
+          content: combinedSystemPrompt,
+        },
+        {
+          role: "assistant",
+          content: fullResponse,
+        },
+        {
+          role: "user",
+          content: implementationPrompt,
+        },
+      ],
+      (chunk: string) => {
+        if (implResponse === "") {
+          console.log(chalk.green.bold("\n🤖 Implementing...\n"));
+          displaySeparator();
+        }
+        implResponse += chunk;
       },
-      {
-        role: "assistant",
-        content: fullResponse,
+      getToolsForTask("code"),
+      (toolCall: unknown) => {
+        displayToolCall(toolCall as ToolCall);
       },
-      {
-        role: "user",
-        content: implementationPrompt,
-      },
-    ],
-    (chunk: string) => {
-      if (implResponse === "") {
-        console.log(chalk.green.bold("\n🤖 Implementing...\n"));
-        displaySeparator();
-      }
-      implResponse += chunk;
-    },
-    getToolsForTask("code"),
-    (toolCall: unknown) => {
-      displayToolCall(toolCall as ToolCall);
-    },
-    { maxSteps: 15 }
-  );
+      { maxSteps: 15 }
+    );
+  } catch (error) {
+    displayWarning(getFriendlyPlanningError(error), "Implementation Failed");
+    return false;
+  }
 
   if (implResponse) {
     const rendered = marked.parse(implResponse);
@@ -556,34 +587,41 @@ export async function runInteractivePlanning(): Promise<void> {
     let fullResponse = "";
     const spin = yoctoSpinner({ text: "Thinking...", color: "cyan" }).start();
 
-    await aiService.sendMessage(
-      messages,
-      (chunk) => {
-        if (fullResponse === "") {
-          spin.stop();
-          console.log(
-            boxen(
-              chalk.bold.green("Planning Partner\n") +
-              chalk.gray("Working through tradeoffs with you before implementation."),
-              {
-                padding: { top: 0, bottom: 0, left: 1, right: 1 },
-                margin: { top: 1, bottom: 0 },
-                borderStyle: "round",
-                borderColor: "green",
-                title: "🤝 Assistant",
-              }
-            )
-          );
-          displaySeparator("─", 72);
-        }
-        fullResponse += chunk;
-      },
-      getToolsForTask("all"),
-      (toolCall: unknown) => {
-        displayToolCall(toolCall as ToolCall);
-      },
-      { maxSteps: 10 }
-    );
+    try {
+      await aiService.sendMessage(
+        messages,
+        (chunk) => {
+          if (fullResponse === "") {
+            spin.stop();
+            console.log(
+              boxen(
+                chalk.bold.green("Planning Partner\n") +
+                chalk.gray("Working through tradeoffs with you before implementation."),
+                {
+                  padding: { top: 0, bottom: 0, left: 1, right: 1 },
+                  margin: { top: 1, bottom: 0 },
+                  borderStyle: "round",
+                  borderColor: "green",
+                  title: "🤝 Assistant",
+                }
+              )
+            );
+            displaySeparator("─", 72);
+          }
+          fullResponse += chunk;
+        },
+        getToolsForTask("all"),
+        (toolCall: unknown) => {
+          displayToolCall(toolCall as ToolCall);
+        },
+        { maxSteps: 10 }
+      );
+    } catch (error) {
+      spin.stop();
+      displayWarning(getFriendlyPlanningError(error), "Planning Request Failed");
+      console.log(chalk.gray("Tip: try /compact or switch model with /model before retrying.\n"));
+      continue;
+    }
 
     spin.stop();
 

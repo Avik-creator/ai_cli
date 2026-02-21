@@ -11,7 +11,7 @@ import { buildSystemPrompt } from "./prompts.ts";
 import { runPlanExecution } from "./plan-executor.ts";
 import { processMessage } from "./message-handler.ts";
 import { isSlashCommand, executeSlashCommand, type SlashCommandContext } from "./slash-commands.ts";
-import { createPanel, formatCommandRows, formatKeyValueRows, formatList } from "../utils/tui.ts";
+import { createPanel, formatCommandRows, formatList, renderPromptDock, renderWordmark } from "../utils/tui.ts";
 
 interface RunAgentOptions {
   mode?: string;
@@ -20,6 +20,46 @@ interface RunAgentOptions {
   switchModel?: boolean;
   modelId?: string;
   planId?: string | null;
+}
+
+function renderResumedHistory(messages: CoreMessage[]): void {
+  const history = messages
+    .filter((message) => message.role === "user" || message.role === "assistant")
+    .slice(-6);
+
+  if (history.length === 0) {
+    return;
+  }
+
+  const lines = history.map((message) => {
+    const roleLabel = message.role === "user"
+      ? chalk.hex("#00e2ff")("you")
+      : chalk.gray("agentic");
+
+    const contentRaw = typeof message.content === "string"
+      ? message.content
+      : Array.isArray(message.content)
+      ? message.content
+          .map((part) => {
+            if (typeof part === "string") return part;
+            if (part && typeof part === "object" && "text" in part && typeof part.text === "string") {
+              return part.text;
+            }
+            return "";
+          })
+          .join(" ")
+      : "";
+
+    const compact = contentRaw.replace(/\s+/g, " ").trim();
+    const preview = compact.length > 180 ? `${compact.slice(0, 177)}...` : compact;
+    return `${roleLabel}${chalk.gray(" > ")}${chalk.white(preview)}`;
+  });
+
+  console.log(chalk.gray("resumed context"));
+  for (const line of lines) {
+    console.log(line);
+  }
+  console.log(chalk.gray("─".repeat(56)));
 }
 
 export async function runAgent(options: RunAgentOptions = {}): Promise<void> {
@@ -46,50 +86,8 @@ export async function runAgent(options: RunAgentOptions = {}): Promise<void> {
   const toolNames = Object.keys(tools);
 
   if (!singlePrompt) {
-    const currentModel = aiService.getModelId();
-    const currentProviderId = await getCurrentProvider();
-    const provider = PROVIDERS[currentProviderId];
-
-    const heroBody =
-      `${chalk.gray("An agentic assistant for development tasks")}\n\n` +
-      formatKeyValueRows([
-        { key: "Provider", value: provider.name },
-        { key: "Model", value: currentModel },
-        { key: "Mode", value: mode },
-        { key: "Tools", value: `${toolNames.length}` },
-      ]);
-
-    console.log(
-      createPanel("🚀 Agent Session", heroBody, {
-        tone: "primary",
-        borderStyle: "double",
-        margin: { top: 1, bottom: 1 },
-      })
-    );
-
-    const previewTools = toolNames.slice(0, 8).map((toolName) => chalk.white(toolName));
-    const hiddenCount = Math.max(toolNames.length - previewTools.length, 0);
-    const quickCommands = formatCommandRows([
-      { command: "help", description: "Show keyboard/text commands" },
-      { command: "/help", description: "Show slash commands" },
-      { command: "tools", description: "See available tools by category" },
-      { command: "exit", description: "Save and leave this session" },
-    ]);
-
-    console.log(
-      createPanel(
-        "🧭 Quick Start",
-        `${chalk.bold.white("Available tools")}\n` +
-          `${formatList(previewTools, "cyan")}` +
-          (hiddenCount > 0 ? `\n${chalk.gray(`• +${hiddenCount} more (type "tools")`)}` : "") +
-          `\n\n${chalk.bold.white("Commands")}\n${quickCommands}`,
-        {
-          tone: "neutral",
-          dimBorder: true,
-          margin: { bottom: 1 },
-        }
-      )
-    );
+    console.clear();
+    renderWordmark("agentic");
   }
 
   let currentSession = options.sessionId 
@@ -101,6 +99,8 @@ export async function runAgent(options: RunAgentOptions = {}): Promise<void> {
   if (options.sessionId && !currentSession) {
     currentSession = sessionManager.createNewSession(mode);
     currentSessionId = currentSession.id;
+    console.log(chalk.yellow(`Session not found: ${options.sessionId}`));
+    console.log(chalk.gray(`Started new session ${currentSessionId.slice(0, 8)}...`));
   }
 
   let messages: CoreMessage[];
@@ -125,6 +125,10 @@ export async function runAgent(options: RunAgentOptions = {}): Promise<void> {
     }];
   }
 
+  if (options.sessionId && currentSession) {
+    renderResumedHistory(messages);
+  }
+
   if (singlePrompt) {
     await processMessage(singlePrompt, messages, tools, null);
     return;
@@ -136,16 +140,24 @@ export async function runAgent(options: RunAgentOptions = {}): Promise<void> {
   }
 
   const personality = sessionManager.getActivePersonality();
-  console.log(
-    chalk.gray(`Session ${currentSessionId?.slice(0, 8)}...`) +
-    chalk.gray("  |  ") +
-    chalk.gray(`Personality ${personality}`)
-  );
+  console.log(chalk.gray(`session ${currentSessionId?.slice(0, 8)}...  •  personality ${personality}`));
 
   while (true) {
+    const currentProviderId = await getCurrentProvider();
+    const provider = PROVIDERS[currentProviderId];
+    const currentModel = aiService.getModelId();
+    renderPromptDock({
+      hint: chalk.hex("#6f7277")('"Fix a TODO in the codebase"'),
+      agentLabel: "agentic (assistant)",
+      modelLabel: currentModel,
+      toolsLabel: `${toolNames.length} tools`,
+      providerLabel: provider.name,
+      shortcuts: "ctrl+t variants   tab agents   ctrl+p commands",
+    });
+
     const userInput = await text({
-      message: chalk.blue("💬 You"),
-      placeholder: "Ask me anything... (/help for commands)",
+      message: chalk.hex("#00e2ff")("›"),
+      placeholder: "Ask anything... (/help for commands)",
       validate: (val: string) => {
         if (!val || val.trim().length === 0) {
           return "Please enter a message";
@@ -267,7 +279,7 @@ function showHelp(): void {
         `${chalk.bold.white("Slash Commands")}\n${slashSection}\n\n` +
         `${chalk.bold.white("Examples")}\n${formatList(examples, "gray")}`,
       {
-        tone: "primary",
+        tone: "neutral",
         margin: 1,
       }
     )
@@ -289,7 +301,7 @@ function showTools(): void {
 
   console.log(
     createPanel("🛠️ Available Tools", sections, {
-      tone: "primary",
+      tone: "neutral",
       margin: 1,
     })
   );

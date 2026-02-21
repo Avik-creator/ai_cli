@@ -2,9 +2,7 @@
 
 import dotenv from "dotenv";
 import chalk from "chalk";
-import figlet from "figlet";
 import { Command } from "commander";
-import { createPanel, formatCommandRows } from "./utils/tui.ts";
 import {
   chatCommand,
   searchCommand,
@@ -44,37 +42,6 @@ process.on("uncaughtException", (error: Error) => {
 });
 
 async function main(): Promise<void> {
-  // Display banner
-  let logoText = "";
-  try {
-    logoText = figlet.textSync("agentic", {
-      font: "Standard",
-      horizontalLayout: "default",
-    });
-  } catch (error) {
-    logoText = "agentic CLI";
-  }
-  const quickStarts = formatCommandRows([
-    { command: "agentic", description: "Start interactive chat in current directory" },
-    { command: "agentic plan run -i", description: "Collaborative planning mode" },
-    { command: "agentic sessions --list", description: "Browse past sessions" },
-    { command: "/help (in chat)", description: "View slash commands and shortcuts" },
-  ]);
-
-  console.log(
-    createPanel(
-      "agentic CLI",
-      `${chalk.cyan(logoText)}\n` +
-        `${chalk.gray("An agentic CLI for web search, PR reviews, code generation, and project execution.")}\n\n` +
-        `${chalk.bold.white("Quick Start")}\n${quickStarts}`,
-      {
-        tone: "primary",
-        borderStyle: "double",
-        margin: { bottom: 1 },
-      }
-    )
-  );
-
   const program = new Command("agentic");
 
   program

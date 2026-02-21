@@ -17,21 +17,13 @@ export interface ToolResult {
 
 export function displayToolCall(toolCall: ToolCall): void {
   const argsJson = JSON.stringify(toolCall.args, null, 2);
-  const argsPreview = argsJson.substring(0, 260);
-  const isTruncated = argsJson.length > 260;
-
-  const panel = createPanel(
-    "Tool Call",
-    `${chalk.bold.white(toolCall.toolName)}\n` +
-      `${chalk.gray("Args")} ${argsPreview}${isTruncated ? chalk.gray(" ...") : ""}`,
-    {
-      tone: "info",
-      padding: { left: 1, right: 1, top: 0, bottom: 0 },
-      margin: { left: 2 },
-      dimBorder: true,
-    }
+  const argsPreview = argsJson.substring(0, 180).replace(/\s+/g, " ");
+  const isTruncated = argsJson.length > 180;
+  console.log(
+    chalk.hex("#00e2ff")("↳") +
+    chalk.white(` ${toolCall.toolName} `) +
+    chalk.gray(`${argsPreview}${isTruncated ? "..." : ""}`)
   );
-  console.log(panel);
 }
 
 export function displayToolResult(toolResult: ToolResult): void {

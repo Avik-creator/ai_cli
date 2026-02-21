@@ -52,13 +52,7 @@ export async function processMessage(
     sessionManager.addSessionMessage(sessionId, "user", input);
   }
 
-  console.log(
-    createPanel("👤 You", chalk.white(input), {
-      tone: "info",
-      padding: 1,
-      margin: { left: 2, top: 1, bottom: 1 },
-    })
-  );
+  console.log(chalk.hex("#00e2ff")("you") + chalk.gray(" > ") + chalk.white(input));
 
   const spin = yoctoSpinner({ text: "Thinking...", color: "cyan" }).start();
 
@@ -71,17 +65,7 @@ export async function processMessage(
       (chunk: string) => {
         if (isFirstChunk) {
           spin.stop();
-          console.log(
-            createPanel(
-              "🤖 Assistant",
-              chalk.gray("Thinking with tools and returning the best next step."),
-              {
-                tone: "success",
-                padding: { top: 0, bottom: 0, left: 1, right: 1 },
-                margin: { top: 1, bottom: 0 },
-              }
-            )
-          );
+          console.log(chalk.gray("agentic >"));
           displaySeparator();
           isFirstChunk = false;
         }
